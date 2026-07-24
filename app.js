@@ -1,0 +1,731 @@
+/* Magazijn Scanner — app-logica
+ * Data: privé-repo flip-o0o-flow/magazijn-data (artikelen.json / telling.json)
+ * Sync: GitHub Contents API met fine-grained PAT (alleen die repo, Contents r/w)
+ */
+'use strict';
+
+const VERSIE = '1.0.0';
+const DATA_REPO = 'flip-o0o-flow/magazijn-data';
+const API_BASE = 'https://api.github.com/repos/' + DATA_REPO + '/contents/';
+
+// ---------- state ----------
+let artikelen = [];            // [{b,a,o,c,f,h,l,v}]
+let artIndex = new Map();      // barcode -> [artikel,...]
+let artNrIndex = new Map();    // artikelnummer (upper) -> artikel
+let telling = { items: {} };   // key -> {b,a,o,c,f,h,l,v,g,best,opm,ts,onb}
+let huidigeKey = null;         // key van artikel in het open paneel
+let huidigArt = null;          // artikel-object in het open paneel
+let syncTimer = null;
+let syncBezig = false;
+let syncNodig = false;
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s == null ? '' : s)
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+// ---------- opslag ----------
+function laadLokaal() {
+  try {
+    const a = localStorage.getItem('mgz_art');
+    if (a) {
+      const d = JSON.parse(a);
+      artikelen = d.artikelen || [];
+      artMeta = { sha: d.sha || null, bijgewerkt: d.bijgewerkt || '?' };
+      bouwIndex();
+    }
+  } catch (e) { /* corrupte cache negeren */ }
+  try {
+    const t = localStorage.getItem('mgz_telling');
+    if (t) telling = JSON.parse(t);
+    if (!telling.items) telling.items = {};
+  } catch (e) { telling = { items: {} }; }
+}
+let artMeta = { sha: null, bijgewerkt: '?' };
+
+function bewaarArt() {
+  localStorage.setItem('mgz_art', JSON.stringify({
+    sha: artMeta.sha, bijgewerkt: artMeta.bijgewerkt, artikelen
+  }));
+}
+function bewaarTelling() {
+  localStorage.setItem('mgz_telling', JSON.stringify(telling));
+}
+function getToken() { return localStorage.getItem('mgz_token') || ''; }
+
+function bouwIndex() {
+  artIndex = new Map();
+  artNrIndex = new Map();
+  for (const art of artikelen) {
+    const lijst = artIndex.get(art.b);
+    if (lijst) lijst.push(art); else artIndex.set(art.b, [art]);
+    if (art.a) artNrIndex.set(art.a.toUpperCase(), art);
+  }
+}
+
+// ---------- GitHub API ----------
+function ghHeaders(extra) {
+  return Object.assign({
+    'Authorization': 'Bearer ' + getToken(),
+    'X-GitHub-Api-Version': '2022-11-28'
+  }, extra || {});
+}
+
+async function ghDirInfo(bestand) {
+  // sha van een bestand opvragen via de mapindex (werkt ook voor bestanden > 1 MB)
+  const r = await fetch(API_BASE + '?t=' + Date.now(), { headers: ghHeaders() });
+  if (!r.ok) throw new Error('GitHub ' + r.status);
+  const lijst = await r.json();
+  return lijst.find(x => x.name === bestand) || null;
+}
+
+async function ghGetRaw(bestand) {
+  const r = await fetch(API_BASE + bestand + '?t=' + Date.now(), {
+    headers: ghHeaders({ 'Accept': 'application/vnd.github.raw+json' })
+  });
+  if (r.status === 404) return null;
+  if (!r.ok) throw new Error('GitHub ' + r.status);
+  return await r.text();
+}
+
+async function ghPut(bestand, tekst, sha, bericht) {
+  const bytes = new TextEncoder().encode(tekst);
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 8192) {
+    bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 8192));
+  }
+  const body = { message: bericht, content: btoa(bin) };
+  if (sha) body.sha = sha;
+  const r = await fetch(API_BASE + bestand, {
+    method: 'PUT', headers: ghHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify(body)
+  });
+  if (!r.ok) {
+    const e = new Error('GitHub ' + r.status);
+    e.status = r.status;
+    throw e;
+  }
+  return (await r.json()).content.sha;
+}
+
+// ---------- artikellijst verversen ----------
+async function verversArtikelen(stil) {
+  if (!getToken()) { toonSetupBanner(); return false; }
+  try {
+    zetStatus('busy', 'Artikellijst…');
+    const info = await ghDirInfo('artikelen.json');
+    if (!info) throw new Error('artikelen.json niet gevonden in de data-repo');
+    if (info.sha === artMeta.sha && artikelen.length) {
+      zetStatus('ok', 'Actueel');
+      if (!stil) toast('Artikellijst is al actueel');
+      updateArtInfo();
+      return true;
+    }
+    const raw = await ghGetRaw('artikelen.json');
+    const d = JSON.parse(raw);
+    artikelen = d.artikelen || [];
+    artMeta = { sha: info.sha, bijgewerkt: d.bijgewerkt || '?' };
+    bouwIndex();
+    bewaarArt();
+    zetStatus('ok', 'Actueel');
+    if (!stil) toast('Artikellijst ververst: ' + artikelen.length + ' artikelen');
+    updateArtInfo();
+    return true;
+  } catch (e) {
+    zetStatus('err', 'Fout');
+    if (!stil) toast('Verversen mislukt: ' + e.message, true);
+    return false;
+  }
+}
+
+function updateArtInfo() {
+  $('artInfo').textContent = artikelen.length
+    ? artikelen.length + ' artikelen · export van ' + artMeta.bijgewerkt
+    : 'Nog geen artikellijst geladen.';
+}
+
+// ---------- telling sync ----------
+function planSync() {
+  syncNodig = true;
+  clearTimeout(syncTimer);
+  syncTimer = setTimeout(syncTelling, 1500);
+}
+
+async function syncTelling() {
+  if (!getToken() || !navigator.onLine) { zetStatus('err', 'Offline'); return; }
+  if (syncBezig) { planSync(); return; }
+  syncBezig = true;
+  syncNodig = false;
+  zetStatus('busy', 'Sync…');
+  try {
+    // ophalen + samenvoegen (nieuwste timestamp wint per artikel)
+    let remote = { items: {} };
+    let sha = null;
+    const raw = await ghGetRaw('telling.json');
+    if (raw !== null) {
+      const info = await ghDirInfo('telling.json');
+      sha = info ? info.sha : null;
+      try { remote = JSON.parse(raw); } catch (e) { remote = { items: {} }; }
+      if (!remote.items) remote.items = {};
+    }
+    let veranderd = false;
+    const samen = Object.assign({}, remote.items);
+    for (const [k, v] of Object.entries(telling.items)) {
+      if (!samen[k] || (v.ts || 0) > (samen[k].ts || 0)) { samen[k] = v; veranderd = true; }
+    }
+    telling.items = samen;
+    bewaarTelling();
+    if (veranderd || raw === null) {
+      await ghPut('telling.json', JSON.stringify({ items: samen }), sha, 'Telling bijgewerkt via app');
+    }
+    zetStatus('ok', 'Gesynct');
+  } catch (e) {
+    if (e.status === 409 || e.status === 422) { planSync(); }
+    else if (e.status === 401 || e.status === 403) { zetStatus('err', 'Token?'); }
+    else zetStatus('err', 'Sync-fout');
+    syncNodig = true;
+  } finally {
+    syncBezig = false;
+    renderAlles();
+    if (syncNodig && navigator.onLine) { clearTimeout(syncTimer); syncTimer = setTimeout(syncTelling, 8000); }
+  }
+}
+
+function zetStatus(soort, tekst) {
+  $('statusDot').className = 'status-dot ' + soort;
+  $('statusTxt').textContent = tekst;
+}
+
+// ---------- scanner ----------
+let camStream = null;
+let camActief = false;
+let zxingReader = null;
+let detectorLus = null;
+let audioCtx = null;
+
+function piep() {
+  try {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const o = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+    o.frequency.value = 1400;
+    g.gain.setValueAtTime(0.25, audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.16);
+    o.connect(g).connect(audioCtx.destination);
+    o.start(); o.stop(audioCtx.currentTime + 0.17);
+  } catch (e) { /* geluid is optioneel */ }
+  if (navigator.vibrate) navigator.vibrate(70);
+}
+
+async function startScanner() {
+  if (camActief) return;
+  camActief = true;
+  $('camOverlay').classList.add('open');
+  $('camMsg').textContent = 'Camera starten…';
+  if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
+  const video = $('camVideo');
+  try {
+    camStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
+      audio: false
+    });
+    video.srcObject = camStream;
+    await video.play();
+    $('camMsg').textContent = 'Richt de camera op de code';
+
+    // zaklamp-knop tonen als de camera dat kan
+    const track = camStream.getVideoTracks()[0];
+    const caps = track.getCapabilities ? track.getCapabilities() : {};
+    $('btnTorch').hidden = !caps.torch;
+    $('btnTorch').classList.remove('torch-on');
+
+    if ('BarcodeDetector' in window) {
+      const formaten = await window.BarcodeDetector.getSupportedFormats();
+      const detector = new window.BarcodeDetector({
+        formats: formaten.filter(f => ['qr_code','code_128','code_39','code_93','ean_13','ean_8','upc_a','upc_e','itf','data_matrix','codabar'].includes(f))
+      });
+      detectorLus = setInterval(async () => {
+        if (!camActief || video.readyState < 2) return;
+        try {
+          const codes = await detector.detect(video);
+          if (codes.length) verwerkScan(codes[0].rawValue);
+        } catch (e) { /* frame overslaan */ }
+      }, 140);
+    } else {
+      // fallback: ZXing
+      const hints = new Map();
+      hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
+        ZXing.BarcodeFormat.QR_CODE, ZXing.BarcodeFormat.CODE_128, ZXing.BarcodeFormat.CODE_39,
+        ZXing.BarcodeFormat.CODE_93, ZXing.BarcodeFormat.EAN_13, ZXing.BarcodeFormat.EAN_8,
+        ZXing.BarcodeFormat.UPC_A, ZXing.BarcodeFormat.UPC_E, ZXing.BarcodeFormat.ITF,
+        ZXing.BarcodeFormat.DATA_MATRIX, ZXing.BarcodeFormat.CODABAR
+      ]);
+      hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
+      zxingReader = new ZXing.BrowserMultiFormatReader(hints);
+      zxingReader.decodeFromStream(camStream, video, (res) => {
+        if (res && camActief) verwerkScan(res.getText());
+      });
+    }
+  } catch (e) {
+    camActief = false;
+    $('camOverlay').classList.remove('open');
+    toast('Camera niet beschikbaar: ' + e.message, true);
+  }
+}
+
+function stopScanner() {
+  camActief = false;
+  clearInterval(detectorLus);
+  detectorLus = null;
+  if (zxingReader) { try { zxingReader.reset(); } catch (e) {} zxingReader = null; }
+  if (camStream) { camStream.getTracks().forEach(t => t.stop()); camStream = null; }
+  $('camVideo').srcObject = null;
+  $('camOverlay').classList.remove('open');
+}
+
+async function wisselTorch() {
+  if (!camStream) return;
+  const track = camStream.getVideoTracks()[0];
+  const aan = !$('btnTorch').classList.contains('torch-on');
+  try {
+    await track.applyConstraints({ advanced: [{ torch: aan }] });
+    $('btnTorch').classList.toggle('torch-on', aan);
+  } catch (e) { toast('Zaklamp niet beschikbaar', true); }
+}
+
+function verwerkScan(code) {
+  if (!camActief) return;
+  stopScanner();
+  piep();
+  zoekEnOpen(String(code).trim());
+}
+
+// ---------- artikel zoeken & paneel ----------
+function zoekEnOpen(code) {
+  let treffers = artIndex.get(code) || [];
+  if (!treffers.length) {
+    const opArtNr = artNrIndex.get(code.toUpperCase());
+    if (opArtNr) treffers = [opArtNr];
+  }
+  if (treffers.length > 1) { toonKiezer(treffers, code); return; }
+  if (treffers.length === 1) { openPaneel(treffers[0]); return; }
+  openPaneelOnbekend(code);
+}
+
+function toonKiezer(treffers, code) {
+  const div = $('kiesLijst');
+  div.innerHTML = '';
+  for (const art of treffers) {
+    const el = document.createElement('div');
+    el.className = 'item';
+    el.innerHTML = '<div class="mid"><div class="t1">' + esc(art.o) + '</div>' +
+      '<div class="t2">' + esc(art.a) + ' · locatie ' + esc(art.l || '?') + '</div></div>' +
+      '<div class="right"><span class="badge groen">' + esc(art.v) + '</span></div>';
+    el.onclick = () => { $('kiesOverlay').classList.remove('open'); openPaneel(art); };
+    div.appendChild(el);
+  }
+  $('kiesOverlay').classList.add('open');
+}
+
+function openPaneel(art) {
+  huidigArt = art;
+  huidigeKey = art.b;
+  const bestaand = telling.items[huidigeKey];
+  $('artKop').innerHTML =
+    '<div class="art-title">' + esc(art.o) + '</div>' +
+    '<div class="art-nr">' + esc(art.a) + (bestaand ? ' <span class="badge groen">al geteld</span>' : '') + '</div>';
+  $('artGrid').innerHTML =
+    veld('Locatie', esc(art.l || '–'), 'big') +
+    veld('Tech. voorraad', esc(art.v || '0'), 'groen big') +
+    veld('Crediteur', esc(art.c || '–')) +
+    veld('Fabrikantcode', esc(art.f || '–')) +
+    veld('Hun nummer', esc(art.h || '–')) +
+    veld('Barcode', esc(art.b));
+  $('inpGeteld').value = bestaand && bestaand.g != null ? bestaand.g : '';
+  $('inpBestellen').value = bestaand && bestaand.best != null ? bestaand.best : '';
+  $('inpOpmerking').value = bestaand ? (bestaand.opm || '') : '';
+  $('btnKlopt').hidden = false;
+  $('scanIdle').hidden = true;
+  $('artPanel').hidden = false;
+  toonView('scan');
+  window.scrollTo(0, 0);
+}
+
+function openPaneelOnbekend(code) {
+  huidigArt = { b: code, a: '', o: 'Onbekende code', c: '', f: '', h: '', l: '', v: '', onb: true };
+  huidigeKey = code;
+  const bestaand = telling.items[huidigeKey];
+  $('artKop').innerHTML =
+    '<div class="art-title">Onbekende code <span class="badge rood">niet in artikellijst</span></div>' +
+    '<div class="art-nr">' + esc(code) + '</div>';
+  $('artGrid').innerHTML = veld('Gescand', esc(code)) +
+    veld('Tip', 'Zet in de opmerking om welk artikel/vak het gaat');
+  $('inpGeteld').value = bestaand && bestaand.g != null ? bestaand.g : '';
+  $('inpBestellen').value = bestaand && bestaand.best != null ? bestaand.best : '';
+  $('inpOpmerking').value = bestaand ? (bestaand.opm || '') : '';
+  $('btnKlopt').hidden = true;
+  $('scanIdle').hidden = true;
+  $('artPanel').hidden = false;
+  toonView('scan');
+  window.scrollTo(0, 0);
+}
+
+function veld(lbl, val, klasse) {
+  return '<div class="art-field"><div class="lbl">' + lbl + '</div><div class="val ' + (klasse || '') + '">' + val + '</div></div>';
+}
+
+function sluitPaneel() {
+  huidigArt = null;
+  huidigeKey = null;
+  $('artPanel').hidden = true;
+  $('scanIdle').hidden = false;
+}
+
+function leesGetal(id) {
+  const v = $(id).value.trim();
+  if (v === '') return null;
+  const n = parseInt(v, 10);
+  return isNaN(n) ? null : n;
+}
+
+function slaOp(kloptDirect) {
+  if (!huidigArt) return;
+  const art = huidigArt;
+  const entry = {
+    b: art.b, a: art.a, o: art.o, c: art.c, f: art.f, h: art.h, l: art.l, v: art.v,
+    g: kloptDirect ? (parseInt(art.v, 10) || 0) : leesGetal('inpGeteld'),
+    best: leesGetal('inpBestellen'),
+    opm: $('inpOpmerking').value.trim(),
+    ts: Date.now()
+  };
+  if (art.onb) entry.onb = true;
+  if (entry.g == null && entry.best == null && !entry.opm) {
+    toast('Niets ingevuld — vul geteld, bestellen of een opmerking in', true);
+    return;
+  }
+  telling.items[huidigeKey] = entry;
+  bewaarTelling();
+  planSync();
+  const naam = art.a || art.b;
+  toast(kloptDirect ? ('✓ ' + naam + ' klopt (' + entry.g + ')') : ('✓ ' + naam + ' opgeslagen'));
+  sluitPaneel();
+  renderAlles();
+  if ($('swDoorscannen').checked) startScanner();
+}
+
+// ---------- handmatig zoeken ----------
+function handmatigZoeken() {
+  const q = $('zoekInput').value.trim();
+  const div = $('zoekResultaten');
+  div.innerHTML = '';
+  if (!q) return;
+  const qU = q.toUpperCase();
+  // exacte treffer eerst
+  let res = (artIndex.get(q) || []).slice();
+  const opNr = artNrIndex.get(qU);
+  if (opNr && !res.includes(opNr)) res.push(opNr);
+  if (!res.length && q.length >= 2) {
+    for (const art of artikelen) {
+      if (art.o.toUpperCase().includes(qU) || art.a.toUpperCase().includes(qU) ||
+          art.f.toUpperCase().includes(qU) || art.h.toUpperCase().includes(qU) ||
+          art.b.includes(q) || art.l.toUpperCase().includes(qU)) {
+        res.push(art);
+        if (res.length >= 40) break;
+      }
+    }
+  }
+  if (!res.length) {
+    div.innerHTML = '<div class="leeg-melding">Niets gevonden voor “' + esc(q) + '”</div>';
+    return;
+  }
+  for (const art of res) {
+    const el = document.createElement('div');
+    el.className = 'item';
+    el.innerHTML = '<div class="mid"><div class="t1">' + esc(art.o) + '</div>' +
+      '<div class="t2">' + esc(art.a) + ' · ' + esc(art.l || 'geen locatie') + '</div></div>' +
+      '<div class="right"><span class="badge groen">' + esc(art.v) + '</span></div>';
+    el.onclick = () => { div.innerHTML = ''; $('zoekInput').value = ''; openPaneel(art); };
+    div.appendChild(el);
+  }
+}
+
+// ---------- lijst-weergave ----------
+function renderLijst() {
+  const items = Object.values(telling.items).sort((a, b2) => (b2.ts || 0) - (a.ts || 0));
+  $('lijstSub').textContent = items.length ? items.length + ' artikelen geregistreerd' : 'Nog niets geteld';
+  const badge = $('navBadge');
+  badge.hidden = !items.length;
+  badge.textContent = items.length;
+  const div = $('lijstItems');
+  div.innerHTML = '';
+  if (!items.length) {
+    div.innerHTML = '<div class="leeg-melding">Scan een code om te beginnen.</div>';
+    return;
+  }
+  for (const it of items) {
+    const verschil = it.g != null && String(it.g) !== String(parseInt(it.v, 10) || 0);
+    let badgeHtml = '';
+    if (it.onb) badgeHtml = '<span class="badge rood">onbekend</span>';
+    else if (verschil) badgeHtml = '<span class="badge rood">' + it.g + ' i.p.v. ' + (parseInt(it.v, 10) || 0) + '</span>';
+    else if (it.g != null) badgeHtml = '<span class="badge groen">✓ ' + it.g + '</span>';
+    if (it.best != null && it.best > 0) badgeHtml += ' <span class="badge geel">bestel ' + it.best + '</span>';
+    const el = document.createElement('div');
+    el.className = 'item';
+    el.innerHTML = '<div class="mid"><div class="t1">' + esc(it.o) + '</div>' +
+      '<div class="t2">' + esc(it.a || it.b) + ' · ' + esc(it.l || '–') +
+      (it.opm ? ' · 💬 ' + esc(it.opm) : '') + '</div></div>' +
+      '<div class="right">' + badgeHtml + '</div>';
+    el.onclick = () => {
+      const art = (artIndex.get(it.b) || [])[0];
+      if (art) openPaneel(art); else openPaneelOnbekend(it.b);
+    };
+    div.appendChild(el);
+  }
+}
+
+// ---------- overzicht ----------
+function renderOverzicht() {
+  const items = Object.values(telling.items);
+  const verschillen = items.filter(it => !it.onb && it.g != null && it.g !== (parseInt(it.v, 10) || 0));
+  const bestellen = items.filter(it => it.best != null && it.best > 0);
+  const opmerkingen = items.filter(it => it.opm);
+  const geteld = items.filter(it => it.g != null);
+
+  $('ovStats').innerHTML =
+    '<div class="stat groen"><div class="n">' + geteld.length + '</div><div class="l">Geteld</div></div>' +
+    '<div class="stat rood"><div class="n">' + verschillen.length + '</div><div class="l">Telverschillen</div></div>' +
+    '<div class="stat geel"><div class="n">' + bestellen.length + '</div><div class="l">Te bestellen</div></div>' +
+    '<div class="stat"><div class="n">' + opmerkingen.length + '</div><div class="l">Opmerkingen</div></div>';
+
+  // telverschillen
+  if (!verschillen.length) {
+    $('ovVerschillen').innerHTML = '<div class="leeg-melding">Geen telverschillen 🎉</div>';
+  } else {
+    let h = '<table><tr><th>Artikel</th><th>Locatie</th><th class="num">Systeem</th><th class="num">Geteld</th><th class="num">Verschil</th></tr>';
+    for (const it of verschillen.sort((a, b) => (a.l || '').localeCompare(b.l || ''))) {
+      const sys = parseInt(it.v, 10) || 0;
+      const d = it.g - sys;
+      h += '<tr><td><b>' + esc(it.a) + '</b><br><span style="color:var(--muted)">' + esc(it.o) + '</span></td>' +
+        '<td>' + esc(it.l || '–') + '</td><td class="num">' + sys + '</td><td class="num">' + it.g + '</td>' +
+        '<td class="num" style="color:var(--red);font-weight:600">' + (d > 0 ? '+' : '') + d + '</td></tr>';
+    }
+    $('ovVerschillen').innerHTML = h + '</table>';
+  }
+
+  // bestellen, gegroepeerd per crediteur
+  if (!bestellen.length) {
+    $('ovBestellen').innerHTML = '<div class="leeg-melding">Niets te bestellen</div>';
+  } else {
+    const groepen = {};
+    for (const it of bestellen) {
+      const c = it.c || 'Onbekende crediteur';
+      (groepen[c] = groepen[c] || []).push(it);
+    }
+    let h = '';
+    for (const cred of Object.keys(groepen).sort()) {
+      const regels = groepen[cred];
+      const kopieTekst = regels.map(it =>
+        it.best + 'x ' + (it.a || it.b) + ' — ' + it.o + (it.h ? ' (hun nr: ' + it.h + ')' : '')
+      ).join('\n');
+      h += '<div class="cred-kop"><span class="naam">' + esc(cred) + '</span>' +
+        '<button class="btn stil klein" data-kopie="' + esc(kopieTekst) + '">Kopieer</button></div>';
+      h += '<div class="tabel-wrap"><table><tr><th>Artikel</th><th>Hun nummer</th><th>Locatie</th><th class="num">Aantal</th></tr>';
+      for (const it of regels) {
+        h += '<tr><td><b>' + esc(it.a || it.b) + '</b><br><span style="color:var(--muted)">' + esc(it.o) + '</span></td>' +
+          '<td>' + esc(it.h || it.f || '–') + '</td><td>' + esc(it.l || '–') + '</td>' +
+          '<td class="num" style="color:var(--yellow);font-weight:650">' + it.best + '</td></tr>';
+      }
+      h += '</table></div>';
+    }
+    $('ovBestellen').innerHTML = h;
+    $('ovBestellen').querySelectorAll('[data-kopie]').forEach(btn => {
+      btn.onclick = () => {
+        navigator.clipboard.writeText(btn.getAttribute('data-kopie'))
+          .then(() => toast('Bestellijst gekopieerd'))
+          .catch(() => toast('Kopiëren mislukt', true));
+      };
+    });
+  }
+
+  // opmerkingen
+  if (!opmerkingen.length) {
+    $('ovOpmerkingen').innerHTML = '<div class="leeg-melding">Geen opmerkingen</div>';
+  } else {
+    let h = '<table><tr><th>Artikel</th><th>Locatie</th><th>Opmerking</th></tr>';
+    for (const it of opmerkingen) {
+      h += '<tr><td><b>' + esc(it.a || it.b) + '</b><br><span style="color:var(--muted)">' + esc(it.o) + '</span></td>' +
+        '<td>' + esc(it.l || '–') + '</td><td>' + esc(it.opm) + '</td></tr>';
+    }
+    $('ovOpmerkingen').innerHTML = h + '</table>';
+  }
+}
+
+function downloadCsv() {
+  const items = Object.values(telling.items).sort((a, b) => (a.l || '').localeCompare(b.l || ''));
+  if (!items.length) { toast('Nog niets geteld', true); return; }
+  const kol = ['Barcode','Artikelnummer','Korte omschrijving','Fabrikantcode','Hun nummer','Locatie','Tech. Voorraad','Geteld','Crediteur','Bestellen','Opmerking'];
+  const cel = (v) => {
+    v = String(v == null ? '' : v);
+    return /[;"\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+  };
+  const regels = [kol.join(';')];
+  for (const it of items) {
+    regels.push([it.b, it.a, it.o, it.f, it.h, it.l, it.v,
+      it.g != null ? it.g : '', it.c, it.best != null ? it.best : '', it.opm].map(cel).join(';'));
+  }
+  const blob = new Blob(['﻿' + regels.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  const d = new Date();
+  a.download = 'Scanlijst ' + d.toISOString().slice(0, 10) + '.csv';
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+// ---------- telling afronden ----------
+async function rondAf() {
+  const n = Object.keys(telling.items).length;
+  if (!n) { toast('De telling is al leeg', true); return; }
+  if (!confirm('Telling afronden?\n\n' + n + ' regels worden gearchiveerd in de cloud en de lijst wordt leeggemaakt.')) return;
+  if (!getToken() || !navigator.onLine) { toast('Afronden kan alleen online', true); return; }
+  try {
+    zetStatus('busy', 'Archiveren…');
+    await syncTellingDirect();
+    const d = new Date();
+    const stamp = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' +
+      String(d.getDate()).padStart(2, '0') + '_' + String(d.getHours()).padStart(2, '0') +
+      String(d.getMinutes()).padStart(2, '0');
+    await ghPut('archief/telling-' + stamp + '.json', JSON.stringify({ afgerond: d.toISOString(), items: telling.items }), null, 'Telling afgerond');
+    const info = await ghDirInfo('telling.json');
+    await ghPut('telling.json', JSON.stringify({ items: {} }), info ? info.sha : null, 'Telling geleegd na afronden');
+    telling = { items: {} };
+    bewaarTelling();
+    renderAlles();
+    zetStatus('ok', 'Gesynct');
+    toast('Telling gearchiveerd en leeggemaakt');
+  } catch (e) {
+    zetStatus('err', 'Fout');
+    toast('Afronden mislukt: ' + e.message, true);
+  }
+}
+
+async function syncTellingDirect() {
+  // synchroon wachten tot de lopende sync klaar is
+  clearTimeout(syncTimer);
+  while (syncBezig) await new Promise(r => setTimeout(r, 200));
+  await syncTelling();
+  while (syncBezig) await new Promise(r => setTimeout(r, 200));
+}
+
+// ---------- UI ----------
+function toonView(naam) {
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  $('view-' + naam).classList.add('active');
+  document.querySelectorAll('nav button[data-view]').forEach(b =>
+    b.classList.toggle('active', b.dataset.view === naam));
+  if (naam === 'overzicht') renderOverzicht();
+  if (naam === 'lijst') renderLijst();
+}
+
+function renderAlles() {
+  renderLijst();
+  if ($('view-overzicht').classList.contains('active')) renderOverzicht();
+}
+
+let toastTimer = null;
+function toast(msg, fout) {
+  const t = $('toast');
+  t.textContent = msg;
+  t.className = fout ? 'err show' : 'show';
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('show'), 2600);
+}
+
+function toonSetupBanner() {
+  $('setupBanner').hidden = !!getToken();
+}
+
+function stepper(inpId, delta) {
+  const inp = $(inpId);
+  const cur = parseInt(inp.value, 10);
+  inp.value = Math.max(0, (isNaN(cur) ? 0 : cur) + delta);
+}
+
+// ---------- events ----------
+function bindEvents() {
+  document.querySelectorAll('nav button[data-view]').forEach(b =>
+    b.addEventListener('click', () => toonView(b.dataset.view)));
+
+  $('btnScan').addEventListener('click', startScanner);
+  $('btnCamSluit').addEventListener('click', stopScanner);
+  $('btnTorch').addEventListener('click', wisselTorch);
+  $('btnKiesSluit').addEventListener('click', () => $('kiesOverlay').classList.remove('open'));
+
+  $('btnZoek').addEventListener('click', handmatigZoeken);
+  $('zoekInput').addEventListener('keydown', e => { if (e.key === 'Enter') handmatigZoeken(); });
+
+  $('gMin').addEventListener('click', () => stepper('inpGeteld', -1));
+  $('gPlus').addEventListener('click', () => stepper('inpGeteld', 1));
+  $('bMin').addEventListener('click', () => stepper('inpBestellen', -1));
+  $('bPlus').addEventListener('click', () => stepper('inpBestellen', 1));
+
+  $('btnOpslaan').addEventListener('click', () => slaOp(false));
+  $('btnKlopt').addEventListener('click', () => slaOp(true));
+  $('btnAnnuleer').addEventListener('click', sluitPaneel);
+
+  $('btnSyncNu').addEventListener('click', () => { syncTelling(); });
+  $('btnCsv').addEventListener('click', downloadCsv);
+  $('btnAfronden').addEventListener('click', rondAf);
+  $('btnArtVerversen').addEventListener('click', () => verversArtikelen(false));
+
+  $('setupBanner').addEventListener('click', () => toonView('instellingen'));
+
+  $('btnTokenOpslaan').addEventListener('click', async () => {
+    const t = $('inpToken').value.trim();
+    if (!t) { toast('Vul eerst een token in', true); return; }
+    localStorage.setItem('mgz_token', t);
+    toonSetupBanner();
+    toast('Token opgeslagen — verbinding testen…');
+    const ok = await verversArtikelen(true);
+    if (ok) { toast('✓ Verbonden met de data-repo'); syncTelling(); }
+    else toast('Verbinden mislukt — controleer het token', true);
+  });
+
+  $('swDoorscannen').addEventListener('change', () =>
+    localStorage.setItem('mgz_doorscannen', $('swDoorscannen').checked ? '1' : '0'));
+
+  window.addEventListener('online', () => { if (syncNodig) syncTelling(); });
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && syncNodig) syncTelling();
+    if (document.visibilityState === 'hidden') stopScanner();
+  });
+}
+
+// ---------- start ----------
+function init() {
+  laadLokaal();
+  bindEvents();
+  $('versieInfo').textContent = 'Magazijn Scanner v' + VERSIE + ' · data: ' + DATA_REPO;
+  $('inpToken').value = getToken();
+  $('swDoorscannen').checked = localStorage.getItem('mgz_doorscannen') !== '0';
+  toonSetupBanner();
+  updateArtInfo();
+  renderLijst();
+
+  // op een pc met groot scherm direct het overzicht tonen
+  if (window.matchMedia('(pointer: fine)').matches && window.innerWidth > 900 && Object.keys(telling.items).length) {
+    toonView('overzicht');
+  }
+
+  if (getToken() && navigator.onLine) {
+    verversArtikelen(true);
+    syncTelling();
+  } else if (!navigator.onLine) {
+    zetStatus('err', 'Offline');
+  } else {
+    zetStatus('err', 'Geen token');
+  }
+
+  if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
+}
+
+init();

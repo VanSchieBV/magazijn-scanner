@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#101413">
+<title>Magazijn Scanner</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header>
+  <h1>Magazijn<span class="accent">Scanner</span></h1>
+  <div class="status-chip"><span class="status-dot" id="statusDot"></span><span id="statusTxt">–</span></div>
+</header>
+
+<main>
+  <!-- ============ SCANNEN ============ -->
+  <section class="view active" id="view-scan">
+    <div id="setupBanner" class="setup-banner" hidden>⚠ Nog geen koppeling ingesteld — tik hier om je GitHub-token in te voeren.</div>
+
+    <div id="scanIdle">
+      <div class="scan-hero">
+        <button class="scan-btn" id="btnScan">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
+            <path d="M3 8V5.5A2.5 2.5 0 0 1 5.5 3H8M16 3h2.5A2.5 2.5 0 0 1 21 5.5V8M21 16v2.5a2.5 2.5 0 0 1-2.5 2.5H16M8 21H5.5A2.5 2.5 0 0 1 3 18.5V16"/>
+            <path d="M7 12h10" stroke-width="2"/>
+            <path d="M7.5 8.5v2M10 8.5v2M12.5 8.5v2M15 8.5v2M16.5 8.5v2M7.5 13.5v2M10 13.5v2M12.5 13.5v2M15 13.5v2M16.5 13.5v2" stroke-width="1.3"/>
+          </svg>
+          Scannen
+        </button>
+        <div class="scan-hint">Richt op de barcode of QR-code van het vak</div>
+      </div>
+
+      <div class="search-row">
+        <input type="search" id="zoekInput" placeholder="Of zoek op nummer / omschrijving…" autocomplete="off">
+        <button id="btnZoek" aria-label="Zoeken">🔍</button>
+      </div>
+      <div class="search-results" id="zoekResultaten"></div>
+    </div>
+
+    <!-- artikelpaneel na scan -->
+    <div id="artPanel" hidden>
+      <div class="card">
+        <div id="artKop"></div>
+        <div class="art-grid" id="artGrid"></div>
+
+        <div class="input-row">
+          <div class="lbl">Geteld</div>
+          <div class="stepper">
+            <button id="gMin">−</button>
+            <input type="number" id="inpGeteld" inputmode="numeric" placeholder="–">
+            <button id="gPlus">+</button>
+          </div>
+        </div>
+        <div class="input-row">
+          <div class="lbl">Bestellen</div>
+          <div class="stepper">
+            <button id="bMin">−</button>
+            <input type="number" id="inpBestellen" inputmode="numeric" placeholder="–">
+            <button id="bPlus">+</button>
+          </div>
+        </div>
+        <div class="input-row">
+          <div class="lbl">Opmerking</div>
+          <textarea id="inpOpmerking" rows="2" placeholder="Bijv. sticker ontbreekt, vak beschadigd…"></textarea>
+        </div>
+
+        <div class="btn-row">
+          <button class="btn geel" id="btnKlopt">✓ Voorraad klopt</button>
+          <button class="btn primair" id="btnOpslaan">Opslaan</button>
+        </div>
+        <div class="btn-row">
+          <button class="btn stil" id="btnAnnuleer">Annuleren</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ GETELD ============ -->
+  <section class="view" id="view-lijst">
+    <div class="card" style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+      <div>
+        <div style="font-weight:650;">Deze telling</div>
+        <div style="font-size:.8rem;color:var(--muted);margin-top:2px;" id="lijstSub">–</div>
+      </div>
+      <button class="btn stil klein" id="btnSyncNu">↻ Sync</button>
+    </div>
+    <div id="lijstItems"></div>
+  </section>
+
+  <!-- ============ OVERZICHT ============ -->
+  <section class="view" id="view-overzicht">
+    <div class="stats" id="ovStats"></div>
+    <div class="card">
+      <h2>Telverschillen</h2>
+      <div class="tabel-wrap" id="ovVerschillen"></div>
+    </div>
+    <div class="card">
+      <h2 class="geel">Bestellen</h2>
+      <div id="ovBestellen"></div>
+    </div>
+    <div class="card">
+      <h2>Opmerkingen</h2>
+      <div class="tabel-wrap" id="ovOpmerkingen"></div>
+    </div>
+    <div class="btn-row">
+      <button class="btn stil" id="btnCsv">⬇ Download Scanlijst (CSV)</button>
+    </div>
+  </section>
+
+  <!-- ============ INSTELLINGEN ============ -->
+  <section class="view" id="view-instellingen">
+    <div class="card">
+      <h2>Koppeling</h2>
+      <div class="set-row">
+        <div class="lbl">GitHub-token (fine-grained PAT)</div>
+        <input type="password" id="inpToken" placeholder="github_pat_…" autocomplete="off">
+        <div class="sub">Token met alleen <b>Contents: read &amp; write</b> op de privé-repo <b>magazijn-data</b>.</div>
+      </div>
+      <div class="btn-row" style="margin-top:0;">
+        <button class="btn primair" id="btnTokenOpslaan">Opslaan &amp; testen</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Artikellijst</h2>
+      <div class="set-row">
+        <div class="sub" id="artInfo">–</div>
+      </div>
+      <div class="btn-row" style="margin-top:0;">
+        <button class="btn stil" id="btnArtVerversen">↻ Artikellijst verversen</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Werkwijze</h2>
+      <div class="switch-row">
+        <div>
+          <div style="font-size:.9rem;">Direct doorscannen</div>
+          <div style="font-size:.78rem;color:var(--muted);">Na opslaan meteen de camera weer openen</div>
+        </div>
+        <label class="switch"><input type="checkbox" id="swDoorscannen"><span class="track"></span></label>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2 class="geel">Telling afronden</h2>
+      <div class="sub" style="color:var(--muted);font-size:.83rem;margin-bottom:12px;">
+        Archiveert de huidige telling in de cloud en maakt de lijst leeg voor een nieuwe ronde.
+      </div>
+      <div class="btn-row" style="margin-top:0;">
+        <button class="btn geel" id="btnAfronden">Telling afronden &amp; leegmaken</button>
+      </div>
+    </div>
+    <div style="text-align:center;color:var(--muted);font-size:.75rem;padding:8px;" id="versieInfo"></div>
+  </section>
+</main>
+
+<!-- camera -->
+<div id="camOverlay">
+  <video id="camVideo" playsinline muted></video>
+  <div class="cam-frame"><span class="c1"></span><span class="c2"></span><div class="cam-scanline"></div></div>
+  <div class="cam-msg" id="camMsg">Richt de camera op de code</div>
+  <div class="cam-bar">
+    <button id="btnTorch" hidden>💡 Lamp</button>
+    <button id="btnCamSluit">✕ Sluiten</button>
+  </div>
+</div>
+
+<!-- keuze bij meerdere treffers -->
+<div class="overlay" id="kiesOverlay">
+  <div class="sheet">
+    <h3>Meerdere artikelen gevonden</h3>
+    <div id="kiesLijst"></div>
+    <div class="btn-row"><button class="btn stil" id="btnKiesSluit">Annuleren</button></div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<nav>
+  <div class="inner">
+    <button data-view="scan" class="active">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3 8V5.5A2.5 2.5 0 0 1 5.5 3H8M16 3h2.5A2.5 2.5 0 0 1 21 5.5V8M21 16v2.5a2.5 2.5 0 0 1-2.5 2.5H16M8 21H5.5A2.5 2.5 0 0 1 3 18.5V16M7 12h10"/></svg>
+      Scannen
+    </button>
+    <button data-view="lijst">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01"/></svg>
+      Geteld<span class="nbadge" id="navBadge" hidden></span>
+    </button>
+    <button data-view="overzicht">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 20V10M10 20V4M16 20v-7M21 20H3"/></svg>
+      Overzicht
+    </button>
+    <button data-view="instellingen">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      Instellingen
+    </button>
+  </div>
+</nav>
+
+<script src="zxing.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

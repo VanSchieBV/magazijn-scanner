@@ -1,0 +1,17 @@
+{
+  "name": "Magazijn Scanner",
+  "short_name": "Magazijn",
+  "description": "Magazijntelling met barcode/QR-scanner",
+  "start_url": ".",
+  "scope": ".",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#101413",
+  "theme_color": "#101413",
+  "lang": "nl",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
