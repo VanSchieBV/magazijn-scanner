@@ -1,17 +1,20 @@
 # Magazijn Scanner — eenmalige installatie
 
-De app staat op: **https://flip-o0o-flow.github.io/magazijn-scanner/**
+De app staat op: **https://vanschiebv.github.io/magazijn-scanner/**
 
-De artikeldata staat in de privé-repo `flip-o0o-flow/magazijn-data`. Elk apparaat
+De artikeldata staat in de privé-repo `VanSchieBV/magazijn-data`. Elk apparaat
 (telefoon, PC) heeft eenmalig een GitHub-token nodig om daarbij te kunnen.
 
 ## 1. GitHub-token (PAT) aanmaken — eenmalig
 
-1. Log in op github.com als **flip-o0o-flow**.
+1. Log in op github.com met een account dat lid is van de **VanSchieBV**-organisatie.
 2. Ga naar **Settings → Developer settings → Personal access tokens → Fine-grained tokens**
    (rechtstreeks: https://github.com/settings/personal-access-tokens/new).
 3. Vul in:
    - **Token name:** `magazijn-scanner`
+   - **Resource owner:** kies **VanSchieBV** (niet je eigen account!).
+     Staat VanSchieBV er niet bij, dan moet een org-beheerder eerst fine-grained
+     tokens toestaan: org **Settings → Third-party Access → Personal access tokens**.
    - **Expiration:** kies bv. 1 jaar (na afloop maak je gewoon een nieuwe en voer je die opnieuw in).
    - **Repository access:** *Only select repositories* → kies **magazijn-data**.
    - **Permissions → Repository permissions → Contents:** **Read and write**.

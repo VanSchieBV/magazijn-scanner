@@ -1,11 +1,11 @@
 /* Magazijn Scanner — app-logica
- * Data: privé-repo flip-o0o-flow/magazijn-data (artikelen.json / telling.json)
+ * Data: privé-repo VanSchieBV/magazijn-data (artikelen.json / telling.json)
  * Sync: GitHub Contents API met fine-grained PAT (alleen die repo, Contents r/w)
  */
 'use strict';
 
-const VERSIE = '1.3.0';
-const DATA_REPO = 'flip-o0o-flow/magazijn-data';
+const VERSIE = '1.3.1';
+const DATA_REPO = 'VanSchieBV/magazijn-data';
 const API_BASE = 'https://api.github.com/repos/' + DATA_REPO + '/contents/';
 
 // ---------- state ----------

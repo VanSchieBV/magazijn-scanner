@@ -6,7 +6,7 @@
 param([string]$Bestand)
 
 $ErrorActionPreference = 'Stop'
-$Repo = 'flip-o0o-flow/magazijn-data'
+$Repo = 'VanSchieBV/magazijn-data'
 # Bronmap: nieuwste "Export Artikelen.xlsx" of ".csv" wint (csv komt er later automatisch)
 $BronMap = 'C:\Users\td\Projecten_AI\Magazijn scanner\Bron'
 
