@@ -1,11 +1,19 @@
-# Artikellijst bijwerken — leest de export (xlsx of csv) en zet hem als
+# Artikellijst bijwerken - leest de export (xlsx of csv) en zet hem als
 # artikelen.json in de prive-repo magazijn-data, zodat de scanner-app de
 # nieuwste artikeldata gebruikt.
+#
+# Leest het xlsx-bestand rechtstreeks (ZIP+XML), Excel wordt niet gestart.
 param([string]$Bestand)
 
 $ErrorActionPreference = 'Stop'
 $Repo = 'flip-o0o-flow/magazijn-data'
 $StandaardBestand = 'C:\Users\td\Desktop\Tijdelijk\Bestellijst Cloud.xlsx'
+
+function Wacht {
+    if ($env:MGZ_STIL) { return }
+    Write-Host ''
+    try { $null = Read-Host 'Druk op Enter om te sluiten' } catch { }
+}
 
 Write-Host ''
 Write-Host '=== Artikellijst bijwerken (Magazijn Scanner) ===' -ForegroundColor Green
@@ -18,77 +26,183 @@ if (-not $Bestand) {
         Add-Type -AssemblyName System.Windows.Forms
         $dlg = New-Object System.Windows.Forms.OpenFileDialog
         $dlg.Title = 'Kies de export (xlsx of csv)'
-        $dlg.Filter = 'Excel of CSV|*.xlsx;*.xls;*.csv'
+        $dlg.Filter = 'Excel of CSV|*.xlsx;*.csv'
         $dlg.InitialDirectory = [Environment]::GetFolderPath('Desktop')
         if ($dlg.ShowDialog() -ne 'OK') { Write-Host 'Geannuleerd.'; exit 1 }
         $Bestand = $dlg.FileName
     }
 }
-if (-not (Test-Path $Bestand)) { Write-Host "Bestand niet gevonden: $Bestand" -ForegroundColor Red; pause; exit 1 }
+if (-not (Test-Path $Bestand)) { Write-Host "Bestand niet gevonden: $Bestand" -ForegroundColor Red; Wacht; exit 1 }
 Write-Host "Bron: $Bestand"
 
-# --- 2. naar CSV (indien Excel) ---
-$TempCsv = Join-Path $env:TEMP 'mgz_artikellijst.csv'
-if ($Bestand -match '\.xlsx?$') {
-    Write-Host 'Excel openen en Artikellijst exporteren...'
-    $xl = New-Object -ComObject Excel.Application
-    $xl.Visible = $false; $xl.DisplayAlerts = $false
-    try {
-        $wb = $xl.Workbooks.Open($Bestand, $null, $true)
-        $ws = $null
-        foreach ($s in $wb.Worksheets) { if ($s.Name -eq 'Artikellijst') { $ws = $s; break } }
-        if (-not $ws) {
-            foreach ($s in $wb.Worksheets) { if ($s.Cells.Item(1,1).Text -eq 'Barcode') { $ws = $s; break } }
+# --- 2. rijen inlezen ---
+function Lees-XlsxSheet {
+    # geeft de rijen van een werkbladf terug als lijst van hashtables kolomletter->waarde
+    param($Zip, [string]$Target, $SharedStrings, [int]$MaxRijen = 0)
+    $entry = $Zip.GetEntry($Target)
+    if (-not $entry) { throw "Werkblad $Target niet gevonden in het xlsx-bestand." }
+    $rd = [System.Xml.XmlReader]::Create($entry.Open())
+    $rijen = New-Object System.Collections.Generic.List[object]
+    $rij = $null; $celRef = $null; $celType = $null; $skip = $false
+    while ($skip -or $rd.Read()) {
+        $skip = $false
+        if ($rd.NodeType -eq 'Element') {
+            switch ($rd.LocalName) {
+                'row' { $rij = @{} }
+                'c'   { $celRef = $rd.GetAttribute('r'); $celType = $rd.GetAttribute('t') }
+                'v'   {
+                    $v = $rd.ReadElementContentAsString(); $skip = $true
+                    if ($celType -eq 's') { $v = $SharedStrings[[int]$v] }
+                    $rij[($celRef -replace '\d', '')] = $v
+                }
+                't'   {
+                    if ($celType -eq 'inlineStr') {
+                        $rij[($celRef -replace '\d', '')] = $rd.ReadElementContentAsString(); $skip = $true
+                    }
+                }
+            }
+        } elseif ($rd.NodeType -eq 'EndElement' -and $rd.LocalName -eq 'row') {
+            if ($rij.Count) { $rijen.Add($rij) }
+            $rij = $null
+            if ($MaxRijen -gt 0 -and $rijen.Count -ge $MaxRijen) { break }
         }
-        if (-not $ws) { throw 'Geen tabblad "Artikellijst" (of tabblad met kolom Barcode) gevonden.' }
-        $ws.Copy()
-        $wb2 = $xl.ActiveWorkbook
-        if (Test-Path $TempCsv) { Remove-Item $TempCsv -Force }
-        $wb2.SaveAs($TempCsv, 62)   # 62 = CSV UTF-8
-        $wb2.Close($false)
-        $wb.Close($false)
-    } finally {
-        $xl.Quit()
-        [System.Runtime.Interopservices.Marshal]::ReleaseComObject($xl) | Out-Null
     }
+    $rd.Close()
+    return , $rijen
+}
+
+$kolommen = $null   # hashtable: kolomnaam -> kolomletter
+$dataRijen = $null  # lijst hashtables kolomletter -> waarde
+
+if ($Bestand -match '\.xlsx$') {
+    Write-Host 'Xlsx-bestand uitlezen...'
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $zip = [IO.Compression.ZipFile]::OpenRead($Bestand)
+    try {
+        # gedeelde teksten
+        $ss = New-Object System.Collections.Generic.List[string]
+        $entry = $zip.GetEntry('xl/sharedStrings.xml')
+        if ($entry) {
+            $rd = [System.Xml.XmlReader]::Create($entry.Open())
+            $huidig = $null; $skip = $false
+            while ($skip -or $rd.Read()) {
+                $skip = $false
+                if ($rd.NodeType -eq 'Element' -and $rd.LocalName -eq 'si') { $huidig = New-Object Text.StringBuilder }
+                elseif ($rd.NodeType -eq 'Element' -and $rd.LocalName -eq 't' -and $huidig -ne $null) { $null = $huidig.Append($rd.ReadElementContentAsString()); $skip = $true }
+                elseif ($rd.NodeType -eq 'EndElement' -and $rd.LocalName -eq 'si') { $ss.Add($huidig.ToString()); $huidig = $null }
+            }
+            $rd.Close()
+        }
+
+        # tabbladen: naam -> xml-bestand
+        [xml]$wbXml = (New-Object IO.StreamReader($zip.GetEntry('xl/workbook.xml').Open())).ReadToEnd()
+        [xml]$relXml = (New-Object IO.StreamReader($zip.GetEntry('xl/_rels/workbook.xml.rels').Open())).ReadToEnd()
+        $relMap = @{}
+        foreach ($r in $relXml.Relationships.Relationship) { $relMap[$r.Id] = 'xl/' + ($r.Target -replace '^/xl/', '') }
+        $sheetMap = [ordered]@{}
+        foreach ($s in $wbXml.workbook.sheets.sheet) {
+            $rid = $s.GetAttribute('id', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships')
+            $sheetMap[$s.name] = $relMap[$rid]
+        }
+
+        # 'Artikellijst' pakken; anders het eerste tabblad met kolom 'Barcode'
+        $doel = $null
+        if ($sheetMap.Contains('Artikellijst')) { $doel = $sheetMap['Artikellijst'] }
+        else {
+            foreach ($naam in $sheetMap.Keys) {
+                $kop = Lees-XlsxSheet -Zip $zip -Target $sheetMap[$naam] -SharedStrings $ss -MaxRijen 1
+                if ($kop.Count -and $kop[0].Values -contains 'Barcode') { $doel = $sheetMap[$naam]; Write-Host "Tabblad '$naam' gebruikt."; break }
+            }
+        }
+        if (-not $doel) { throw 'Geen tabblad "Artikellijst" (of tabblad met kolom Barcode) gevonden.' }
+
+        $alle = Lees-XlsxSheet -Zip $zip -Target $doel -SharedStrings $ss
+    } finally {
+        $zip.Dispose()
+    }
+    if ($alle.Count -lt 2) { throw 'Het tabblad is leeg.' }
+    $kolommen = @{}
+    foreach ($kv in $alle[0].GetEnumerator()) { $kolommen[('' + $kv.Value).Trim()] = $kv.Key }
+    $dataRijen = $alle.GetRange(1, $alle.Count - 1)
 } else {
-    Copy-Item $Bestand $TempCsv -Force
+    Write-Host 'CSV-bestand uitlezen...'
+    $eersteRegel = Get-Content $Bestand -TotalCount 1 -Encoding UTF8
+    $delim = if (($eersteRegel -split ';').Count -gt ($eersteRegel -split ',').Count) { ';' } else { ',' }
+    $csv = Import-Csv $Bestand -Delimiter $delim -Encoding UTF8
+    if (-not $csv.Count) { throw 'Het csv-bestand is leeg.' }
+    $kolommen = @{}
+    foreach ($naam in $csv[0].PSObject.Properties.Name) { $kolommen[$naam.Trim()] = $naam }
+    $dataRijen = New-Object System.Collections.Generic.List[object]
+    foreach ($r in $csv) {
+        $h = @{}
+        foreach ($p in $r.PSObject.Properties) { $h[$p.Name] = $p.Value }
+        $dataRijen.Add($h)
+    }
 }
 
-# --- 3. CSV -> JSON ---
+# --- 3. omzetten naar JSON ---
+$voorraadKop = ($kolommen.Keys | Where-Object { $_ -match '^Tech' } | Select-Object -First 1)
+$vereist = @('Barcode', 'Artikelnummer', 'Korte omschrijving', 'Crediteur', 'Fabrikantcode', 'Hun nummer', 'Locatie')
+foreach ($k in $vereist) { if (-not $kolommen.Contains($k)) { throw "Kolom '$k' niet gevonden in de export." } }
+if (-not $voorraadKop) { throw 'Kolom met technische voorraad (Tech...) niet gevonden.' }
+
+function JsonEsc {
+    param([string]$s)
+    if ($null -eq $s) { return '' }
+    $sb = New-Object Text.StringBuilder
+    foreach ($ch in $s.ToCharArray()) {
+        switch ($ch) {
+            '"'  { $null = $sb.Append('\"') }
+            '\' { $null = $sb.Append('\\') }
+            default {
+                if ([int]$ch -lt 32) { $null = $sb.AppendFormat('\u{0:x4}', [int]$ch) }
+                else { $null = $sb.Append($ch) }
+            }
+        }
+    }
+    $sb.ToString()
+}
+
 Write-Host 'Omzetten naar JSON...'
-$eersteRegel = Get-Content $TempCsv -TotalCount 1 -Encoding UTF8
-$delim = if (($eersteRegel -split ';').Count -gt ($eersteRegel -split ',').Count) { ';' } else { ',' }
-$rijen = Import-Csv $TempCsv -Delimiter $delim -Encoding UTF8
-
-# kolomnaam Techn.voorraad / Tech. Voorraad kan verschillen per export
-$voorraadKolom = ($rijen[0].PSObject.Properties.Name | Where-Object { $_ -match '^Tech' } | Select-Object -First 1)
-if (-not $voorraadKolom) { throw 'Kolom met technische voorraad niet gevonden.' }
-
-$lijst = New-Object System.Collections.Generic.List[object]
-foreach ($r in $rijen) {
-    $bc = ('' + $r.Barcode).Trim()
-    if (-not $bc) { continue }
-    $lijst.Add([ordered]@{
-        b = $bc
-        a = ('' + $r.Artikelnummer).Trim()
-        o = ('' + $r.'Korte omschrijving').Trim()
-        c = ('' + $r.Crediteur).Trim()
-        f = ('' + $r.Fabrikantcode).Trim()
-        h = ('' + $r.'Hun nummer').Trim()
-        l = ('' + $r.Locatie).Trim()
-        v = ('' + $r.$voorraadKolom).Trim()
-    })
+$sb = New-Object Text.StringBuilder
+$null = $sb.Append('{"bijgewerkt":"').Append((Get-Date -Format 'yyyy-MM-dd HH:mm')).Append('","artikelen":[')
+$aantal = 0
+$veldKol = @{
+    b = $kolommen['Barcode']; a = $kolommen['Artikelnummer']; o = $kolommen['Korte omschrijving']
+    c = $kolommen['Crediteur']; f = $kolommen['Fabrikantcode']; h = $kolommen['Hun nummer']
+    l = $kolommen['Locatie']; v = $kolommen[$voorraadKop]
 }
-if ($lijst.Count -lt 10) { throw "Slechts $($lijst.Count) artikelen gevonden - dat lijkt niet goed. Gestopt." }
-
-$json = @{ bijgewerkt = (Get-Date -Format 'yyyy-MM-dd HH:mm'); artikelen = $lijst } | ConvertTo-Json -Compress -Depth 4
-Write-Host ("{0} artikelen, {1:N0} kB JSON" -f $lijst.Count, ($json.Length/1024))
+foreach ($rij in $dataRijen) {
+    $bc = ('' + $rij[$veldKol.b]).Trim()
+    if (-not $bc) { continue }
+    if ($aantal) { $null = $sb.Append(',') }
+    $null = $sb.Append('{"b":"').Append((JsonEsc $bc))
+    $null = $sb.Append('","a":"').Append((JsonEsc ('' + $rij[$veldKol.a]).Trim()))
+    $null = $sb.Append('","o":"').Append((JsonEsc ('' + $rij[$veldKol.o]).Trim()))
+    $null = $sb.Append('","c":"').Append((JsonEsc ('' + $rij[$veldKol.c]).Trim()))
+    $null = $sb.Append('","f":"').Append((JsonEsc ('' + $rij[$veldKol.f]).Trim()))
+    $null = $sb.Append('","h":"').Append((JsonEsc ('' + $rij[$veldKol.h]).Trim()))
+    $null = $sb.Append('","l":"').Append((JsonEsc ('' + $rij[$veldKol.l]).Trim()))
+    $null = $sb.Append('","v":"').Append((JsonEsc ('' + $rij[$veldKol.v]).Trim()))
+    $null = $sb.Append('"}')
+    $aantal++
+}
+$null = $sb.Append(']}')
+$json = $sb.ToString()
+if ($aantal -lt 10) { throw "Slechts $aantal artikelen gevonden - dat lijkt niet goed. Gestopt." }
+Write-Host ("{0} artikelen, {1:N0} kB JSON" -f $aantal, ($json.Length / 1024))
 
 # --- 4. GitHub-token via credential manager (GitHub Desktop) ---
 Write-Host 'Aanmelden bij GitHub...'
-$token = (@('protocol=https', 'host=github.com', '') | git credential fill |
-    Where-Object { $_ -like 'password=*' } | Select-Object -First 1) -replace '^password=', ''
+# stdin via cmd-redirect: rechtstreeks pipen vanuit PowerShell komt niet goed aan bij git
+$credFile = Join-Path $PSScriptRoot '_cred_tmp.txt'
+"protocol=https`nhost=github.com`n" | Out-File -FilePath $credFile -Encoding ascii
+try {
+    $credUit = cmd /c "git credential fill < `"$credFile`""
+} finally {
+    Remove-Item $credFile -Force -ErrorAction SilentlyContinue
+}
+$token = ($credUit | Where-Object { $_ -like 'password=*' } | Select-Object -First 1) -replace '^password=', ''
 if (-not $token) { throw 'Geen GitHub-token gevonden. Meld eerst aan via GitHub Desktop.' }
 
 $headers = @{ Authorization = "Bearer $token"; 'X-GitHub-Api-Version' = '2022-11-28'; 'User-Agent' = 'MagazijnScanner' }
@@ -103,7 +217,7 @@ try {
 
 Write-Host 'Uploaden naar de cloud...'
 $body = @{
-    message = "Artikellijst bijgewerkt ($($lijst.Count) artikelen)"
+    message = "Artikellijst bijgewerkt ($aantal artikelen)"
     content = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($json))
 }
 if ($sha) { $body.sha = $sha }
@@ -111,7 +225,6 @@ $null = Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/contents/arti
     -Method Put -Headers $headers -Body ($body | ConvertTo-Json) -ContentType 'application/json'
 
 Write-Host ''
-Write-Host ("KLAAR - {0} artikelen staan in de cloud." -f $lijst.Count) -ForegroundColor Green
+Write-Host ("KLAAR - {0} artikelen staan in de cloud." -f $aantal) -ForegroundColor Green
 Write-Host 'De app haalt de nieuwe lijst automatisch op bij de volgende start (of via Instellingen > Verversen).'
-Write-Host ''
-pause
+Wacht
