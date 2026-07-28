@@ -4,7 +4,7 @@
  */
 'use strict';
 
-const VERSIE = '1.0.0';
+const VERSIE = '1.2.0';
 const DATA_REPO = 'flip-o0o-flow/magazijn-data';
 const API_BASE = 'https://api.github.com/repos/' + DATA_REPO + '/contents/';
 
@@ -15,6 +15,8 @@ let artNrIndex = new Map();    // artikelnummer (upper) -> artikel
 let telling = { items: {} };   // key -> {b,a,o,c,f,h,l,v,g,best,opm,ts,onb}
 let huidigeKey = null;         // key van artikel in het open paneel
 let huidigArt = null;          // artikel-object in het open paneel
+let bladerKeys = [];           // volgorde om door getelde artikelen te bladeren
+let bladerIdx = -1;
 let syncTimer = null;
 let syncBezig = false;
 let syncNodig = false;
@@ -201,6 +203,41 @@ let camActief = false;
 let zxingReader = null;
 let detectorLus = null;
 let audioCtx = null;
+let scanTriggerTot = 0;   // tot welk tijdstip (ms) er actief gescand wordt
+let triggerTimer = null;
+
+const TRIGGER_VENSTER = 2500; // ms zoeken na een druk op de scanknop
+
+function scanActief() { return camActief && Date.now() <= scanTriggerTot; }
+
+function scanNu() {
+  if (!camActief) return;
+  scanTriggerTot = Date.now() + TRIGGER_VENSTER;
+  $('camOverlay').classList.add('scanning');
+  $('camMsg').textContent = 'Scannen…';
+  clearTimeout(triggerTimer);
+  triggerTimer = setTimeout(() => {
+    if (camActief && !scanActief()) {
+      $('camOverlay').classList.remove('scanning');
+      $('camMsg').textContent = 'Geen code gevonden — richt en druk opnieuw op Scan';
+    }
+  }, TRIGGER_VENSTER + 100);
+}
+
+// bij meerdere codes in beeld: pak de code die het dichtst bij het midden ligt
+function dichtstBijMidden(codes, video) {
+  const cx = video.videoWidth / 2, cy = video.videoHeight / 2;
+  let beste = codes[0], besteAfstand = Infinity;
+  for (const c of codes) {
+    const b = c.boundingBox;
+    if (!b) continue;
+    const dx = (b.x + b.width / 2) - cx;
+    const dy = (b.y + b.height / 2) - cy;
+    const afstand = dx * dx + dy * dy;
+    if (afstand < besteAfstand) { besteAfstand = afstand; beste = c; }
+  }
+  return beste;
+}
 
 function piep() {
   try {
@@ -219,7 +256,9 @@ function piep() {
 async function startScanner() {
   if (camActief) return;
   camActief = true;
+  scanTriggerTot = 0;
   $('camOverlay').classList.add('open');
+  $('camOverlay').classList.remove('scanning');
   $('camMsg').textContent = 'Camera starten…';
   if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
   const video = $('camVideo');
@@ -230,7 +269,7 @@ async function startScanner() {
     });
     video.srcObject = camStream;
     await video.play();
-    $('camMsg').textContent = 'Richt de camera op de code';
+    $('camMsg').textContent = 'Richt op de code en druk op Scan';
 
     // zaklamp-knop tonen als de camera dat kan
     const track = camStream.getVideoTracks()[0];
@@ -244,10 +283,10 @@ async function startScanner() {
         formats: formaten.filter(f => ['qr_code','code_128','code_39','code_93','ean_13','ean_8','upc_a','upc_e','itf','data_matrix','codabar'].includes(f))
       });
       detectorLus = setInterval(async () => {
-        if (!camActief || video.readyState < 2) return;
+        if (!scanActief() || video.readyState < 2) return;
         try {
           const codes = await detector.detect(video);
-          if (codes.length) verwerkScan(codes[0].rawValue);
+          if (codes.length && scanActief()) verwerkScan(dichtstBijMidden(codes, video).rawValue);
         } catch (e) { /* frame overslaan */ }
       }, 140);
     } else {
@@ -262,7 +301,7 @@ async function startScanner() {
       hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
       zxingReader = new ZXing.BrowserMultiFormatReader(hints);
       zxingReader.decodeFromStream(camStream, video, (res) => {
-        if (res && camActief) verwerkScan(res.getText());
+        if (res && scanActief()) verwerkScan(res.getText());
       });
     }
   } catch (e) {
@@ -274,8 +313,11 @@ async function startScanner() {
 
 function stopScanner() {
   camActief = false;
+  scanTriggerTot = 0;
+  clearTimeout(triggerTimer);
   clearInterval(detectorLus);
   detectorLus = null;
+  $('camOverlay').classList.remove('scanning');
   if (zxingReader) { try { zxingReader.reset(); } catch (e) {} zxingReader = null; }
   if (camStream) { camStream.getTracks().forEach(t => t.stop()); camStream = null; }
   $('camVideo').srcObject = null;
@@ -294,6 +336,7 @@ async function wisselTorch() {
 
 function verwerkScan(code) {
   if (!camActief) return;
+  scanTriggerTot = 0;
   stopScanner();
   piep();
   zoekEnOpen(String(code).trim());
@@ -326,37 +369,45 @@ function toonKiezer(treffers, code) {
   $('kiesOverlay').classList.add('open');
 }
 
-function openPaneel(art) {
+function openPaneel(art, behoudBlader) {
   huidigArt = art;
   huidigeKey = art.b;
   const bestaand = telling.items[huidigeKey];
   $('artKop').innerHTML =
     '<div class="art-title">' + esc(art.o) + '</div>' +
-    '<div class="art-nr">' + esc(art.a) + (bestaand ? ' <span class="badge groen">al geteld</span>' : '') + '</div>';
+    '<div class="art-nr">' + esc(art.a) +
+    (bestaand ? ' <span class="badge groen">al geteld</span>' : '') +
+    (bestaand && bestaand.bsd ? ' <span class="badge geel">🛒 besteld</span>' : '') + '</div>';
   $('artGrid').innerHTML =
     veld('Locatie', esc(art.l || '–'), 'big') +
     veld('Tech. voorraad', esc(art.v || '0'), 'groen big') +
     veld('Crediteur', esc(art.c || '–')) +
-    veld('Fabrikantcode', esc(art.f || '–')) +
+    veld('Fabrikantcode', esc(art.f || '–') +
+      (art.f ? ' <button class="copy-mini" data-copy="' + esc(art.f) + '">⧉ kopieer</button>' : '')) +
     veld('Hun nummer', esc(art.h || '–')) +
     veld('Barcode', esc(art.b));
+  bindKopieKnoppen($('artGrid'), 'Fabrikantcode gekopieerd');
   $('inpGeteld').value = bestaand && bestaand.g != null ? bestaand.g : '';
   $('inpBestellen').value = bestaand && bestaand.best != null ? bestaand.best : '';
   $('inpOpmerking').value = bestaand ? (bestaand.opm || '') : '';
   $('btnKlopt').hidden = false;
   $('scanIdle').hidden = true;
   $('artPanel').hidden = false;
+  if (!behoudBlader) bouwBlader();
+  updateBladerUI();
+  updateBesteldKnop();
   toonView('scan');
   window.scrollTo(0, 0);
 }
 
-function openPaneelOnbekend(code) {
+function openPaneelOnbekend(code, behoudBlader) {
   huidigArt = { b: code, a: '', o: 'Onbekende code', c: '', f: '', h: '', l: '', v: '', onb: true };
   huidigeKey = code;
   const bestaand = telling.items[huidigeKey];
   $('artKop').innerHTML =
     '<div class="art-title">Onbekende code <span class="badge rood">niet in artikellijst</span></div>' +
-    '<div class="art-nr">' + esc(code) + '</div>';
+    '<div class="art-nr">' + esc(code) +
+    (bestaand && bestaand.bsd ? ' <span class="badge geel">🛒 besteld</span>' : '') + '</div>';
   $('artGrid').innerHTML = veld('Gescand', esc(code)) +
     veld('Tip', 'Zet in de opmerking om welk artikel/vak het gaat');
   $('inpGeteld').value = bestaand && bestaand.g != null ? bestaand.g : '';
@@ -365,8 +416,89 @@ function openPaneelOnbekend(code) {
   $('btnKlopt').hidden = true;
   $('scanIdle').hidden = true;
   $('artPanel').hidden = false;
+  if (!behoudBlader) bouwBlader();
+  updateBladerUI();
+  updateBesteldKnop();
   toonView('scan');
   window.scrollTo(0, 0);
+}
+
+function bindKopieKnoppen(container, melding) {
+  container.querySelectorAll('[data-copy]').forEach(btn => {
+    btn.onclick = () => {
+      navigator.clipboard.writeText(btn.getAttribute('data-copy'))
+        .then(() => toast(melding))
+        .catch(() => toast('Kopiëren mislukt', true));
+    };
+  });
+}
+
+// ---------- bladeren door getelde artikelen ----------
+function bouwBlader() {
+  bladerKeys = Object.entries(telling.items)
+    .sort((x, y) => (y[1].ts || 0) - (x[1].ts || 0))
+    .map(x => x[0]);
+}
+
+function updateBladerUI() {
+  bladerIdx = bladerKeys.indexOf(huidigeKey);
+  const nav = $('bladerNav');
+  if (bladerIdx < 0 || bladerKeys.length < 2) { nav.hidden = true; return; }
+  nav.hidden = false;
+  $('bladerPos').textContent = (bladerIdx + 1) + ' / ' + bladerKeys.length;
+  $('btnVorig').disabled = bladerIdx === 0;
+  $('btnVolgend').disabled = bladerIdx === bladerKeys.length - 1;
+}
+
+function blader(richting) {
+  const i = bladerIdx + richting;
+  if (i < 0 || i >= bladerKeys.length) return;
+  openViaKey(bladerKeys[i]);
+}
+
+function openViaKey(key) {
+  const it = telling.items[key];
+  if (!it) { bouwBlader(); updateBladerUI(); return; }
+  const art = (artIndex.get(it.b) || [])[0];
+  if (art) openPaneel(art, true); else openPaneelOnbekend(it.b, true);
+}
+
+// ---------- besteld-markering ----------
+function updateBesteldKnop() {
+  const btn = $('btnBesteld');
+  const bestaand = telling.items[huidigeKey];
+  if (bestaand && bestaand.bsd) {
+    btn.textContent = '🛒 Besteld ✓ — tik om ongedaan te maken';
+    btn.classList.add('besteld-actief');
+  } else {
+    const heeftVolgende = bladerIdx >= 0 && bladerIdx < bladerKeys.length - 1;
+    btn.textContent = heeftVolgende ? '🛒 Besteld → volgende artikel' : '🛒 Markeer als besteld';
+    btn.classList.remove('besteld-actief');
+  }
+}
+
+function wisselBesteld() {
+  if (!huidigArt) return;
+  const bestaand = telling.items[huidigeKey];
+  if (bestaand && bestaand.bsd) {
+    delete bestaand.bsd;
+    bestaand.ts = Date.now();
+    bewaarTelling();
+    planSync();
+    renderAlles();
+    updateBesteldKnop();
+    toast('Bestelmarkering verwijderd');
+    return;
+  }
+  const entry = bouwEntry(false);
+  entry.bsd = Date.now();
+  telling.items[huidigeKey] = entry;
+  bewaarTelling();
+  planSync();
+  renderAlles();
+  toast('🛒 ' + (huidigArt.a || huidigArt.b) + ' besteld');
+  if (bladerIdx >= 0 && bladerIdx < bladerKeys.length - 1) blader(1);
+  else { updateBladerUI(); updateBesteldKnop(); }
 }
 
 function veld(lbl, val, klasse) {
@@ -387,8 +519,7 @@ function leesGetal(id) {
   return isNaN(n) ? null : n;
 }
 
-function slaOp(kloptDirect) {
-  if (!huidigArt) return;
+function bouwEntry(kloptDirect) {
   const art = huidigArt;
   const entry = {
     b: art.b, a: art.a, o: art.o, c: art.c, f: art.f, h: art.h, l: art.l, v: art.v,
@@ -398,6 +529,15 @@ function slaOp(kloptDirect) {
     ts: Date.now()
   };
   if (art.onb) entry.onb = true;
+  const oud = telling.items[huidigeKey];
+  if (oud && oud.bsd) entry.bsd = oud.bsd; // besteld-markering behouden bij opnieuw opslaan
+  return entry;
+}
+
+function slaOp(kloptDirect) {
+  if (!huidigArt) return;
+  const art = huidigArt;
+  const entry = bouwEntry(kloptDirect);
   if (entry.g == null && entry.best == null && !entry.opm) {
     toast('Niets ingevuld — vul geteld, bestellen of een opmerking in', true);
     return;
@@ -467,7 +607,8 @@ function renderLijst() {
     if (it.onb) badgeHtml = '<span class="badge rood">onbekend</span>';
     else if (verschil) badgeHtml = '<span class="badge rood">' + it.g + ' i.p.v. ' + (parseInt(it.v, 10) || 0) + '</span>';
     else if (it.g != null) badgeHtml = '<span class="badge groen">✓ ' + it.g + '</span>';
-    if (it.best != null && it.best > 0) badgeHtml += ' <span class="badge geel">bestel ' + it.best + '</span>';
+    if (it.bsd) badgeHtml += ' <span class="badge groen">🛒 besteld' + (it.best > 0 ? ' ' + it.best : '') + '</span>';
+    else if (it.best != null && it.best > 0) badgeHtml += ' <span class="badge geel">bestel ' + it.best + '</span>';
     const el = document.createElement('div');
     el.className = 'item';
     el.innerHTML = '<div class="mid"><div class="t1">' + esc(it.o) + '</div>' +
@@ -523,16 +664,21 @@ function renderOverzicht() {
     let h = '';
     for (const cred of Object.keys(groepen).sort()) {
       const regels = groepen[cred];
-      const kopieTekst = regels.map(it =>
+      const nogTeDoen = regels.filter(it => !it.bsd);
+      const kopieTekst = nogTeDoen.map(it =>
         it.best + 'x ' + (it.a || it.b) + ' — ' + it.o + (it.h ? ' (hun nr: ' + it.h + ')' : '')
       ).join('\n');
       h += '<div class="cred-kop"><span class="naam">' + esc(cred) + '</span>' +
-        '<button class="btn stil klein" data-kopie="' + esc(kopieTekst) + '">Kopieer</button></div>';
+        (nogTeDoen.length
+          ? '<button class="btn stil klein" data-kopie="' + esc(kopieTekst) + '">Kopieer</button>'
+          : '<span class="badge groen">🛒 alles besteld</span>') + '</div>';
       h += '<div class="tabel-wrap"><table><tr><th>Artikel</th><th>Hun nummer</th><th>Locatie</th><th class="num">Aantal</th></tr>';
       for (const it of regels) {
-        h += '<tr><td><b>' + esc(it.a || it.b) + '</b><br><span style="color:var(--muted)">' + esc(it.o) + '</span></td>' +
+        h += '<tr' + (it.bsd ? ' class="rij-besteld"' : '') + '><td><b>' + esc(it.a || it.b) + '</b><br><span style="color:var(--muted)">' + esc(it.o) + '</span></td>' +
           '<td>' + esc(it.h || it.f || '–') + '</td><td>' + esc(it.l || '–') + '</td>' +
-          '<td class="num" style="color:var(--yellow);font-weight:650">' + it.best + '</td></tr>';
+          '<td class="num" style="font-weight:650">' +
+          (it.bsd ? '<span style="color:var(--green)">🛒 ' + it.best + '</span>' : '<span style="color:var(--yellow)">' + it.best + '</span>') +
+          '</td></tr>';
       }
       h += '</table></div>';
     }
@@ -562,7 +708,7 @@ function renderOverzicht() {
 function downloadCsv() {
   const items = Object.values(telling.items).sort((a, b) => (a.l || '').localeCompare(b.l || ''));
   if (!items.length) { toast('Nog niets geteld', true); return; }
-  const kol = ['Barcode','Artikelnummer','Korte omschrijving','Fabrikantcode','Hun nummer','Locatie','Tech. Voorraad','Geteld','Crediteur','Bestellen','Opmerking'];
+  const kol = ['Barcode','Artikelnummer','Korte omschrijving','Fabrikantcode','Hun nummer','Locatie','Tech. Voorraad','Geteld','Crediteur','Bestellen','Besteld','Opmerking'];
   const cel = (v) => {
     v = String(v == null ? '' : v);
     return /[;"\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
@@ -570,7 +716,8 @@ function downloadCsv() {
   const regels = [kol.join(';')];
   for (const it of items) {
     regels.push([it.b, it.a, it.o, it.f, it.h, it.l, it.v,
-      it.g != null ? it.g : '', it.c, it.best != null ? it.best : '', it.opm].map(cel).join(';'));
+      it.g != null ? it.g : '', it.c, it.best != null ? it.best : '',
+      it.bsd ? 'ja' : '', it.opm].map(cel).join(';'));
   }
   const blob = new Blob(['﻿' + regels.join('\r\n')], { type: 'text/csv;charset=utf-8' });
   const a = document.createElement('a');
@@ -656,6 +803,7 @@ function bindEvents() {
     b.addEventListener('click', () => toonView(b.dataset.view)));
 
   $('btnScan').addEventListener('click', startScanner);
+  $('btnTrigger').addEventListener('click', scanNu);
   $('btnCamSluit').addEventListener('click', stopScanner);
   $('btnTorch').addEventListener('click', wisselTorch);
   $('btnKiesSluit').addEventListener('click', () => $('kiesOverlay').classList.remove('open'));
@@ -671,6 +819,9 @@ function bindEvents() {
   $('btnOpslaan').addEventListener('click', () => slaOp(false));
   $('btnKlopt').addEventListener('click', () => slaOp(true));
   $('btnAnnuleer').addEventListener('click', sluitPaneel);
+  $('btnBesteld').addEventListener('click', wisselBesteld);
+  $('btnVorig').addEventListener('click', () => blader(-1));
+  $('btnVolgend').addEventListener('click', () => blader(1));
 
   $('btnSyncNu').addEventListener('click', () => { syncTelling(); });
   $('btnCsv').addEventListener('click', downloadCsv);

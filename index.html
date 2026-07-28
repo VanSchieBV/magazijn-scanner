@@ -23,7 +23,14 @@
     <div id="setupBanner" class="setup-banner" hidden>⚠ Nog geen koppeling ingesteld — tik hier om je GitHub-token in te voeren.</div>
 
     <div id="scanIdle">
+      <div class="search-row">
+        <input type="search" id="zoekInput" placeholder="Zoek op nummer / omschrijving…" autocomplete="off">
+        <button id="btnZoek" aria-label="Zoeken">🔍</button>
+      </div>
+      <div class="search-results" id="zoekResultaten"></div>
+
       <div class="scan-hero">
+        <div class="scan-hint">Richt op de code van het vak en druk op de scanknop</div>
         <button class="scan-btn" id="btnScan">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
             <path d="M3 8V5.5A2.5 2.5 0 0 1 5.5 3H8M16 3h2.5A2.5 2.5 0 0 1 21 5.5V8M21 16v2.5a2.5 2.5 0 0 1-2.5 2.5H16M8 21H5.5A2.5 2.5 0 0 1 3 18.5V16"/>
@@ -32,19 +39,17 @@
           </svg>
           Scannen
         </button>
-        <div class="scan-hint">Richt op de barcode of QR-code van het vak</div>
       </div>
-
-      <div class="search-row">
-        <input type="search" id="zoekInput" placeholder="Of zoek op nummer / omschrijving…" autocomplete="off">
-        <button id="btnZoek" aria-label="Zoeken">🔍</button>
-      </div>
-      <div class="search-results" id="zoekResultaten"></div>
     </div>
 
     <!-- artikelpaneel na scan -->
     <div id="artPanel" hidden>
       <div class="card">
+        <div class="blader-nav" id="bladerNav" hidden>
+          <button id="btnVorig" aria-label="Vorig artikel">‹</button>
+          <span class="pos" id="bladerPos"></span>
+          <button id="btnVolgend" aria-label="Volgend artikel">›</button>
+        </div>
         <div id="artKop"></div>
         <div class="art-grid" id="artGrid"></div>
 
@@ -72,6 +77,9 @@
         <div class="btn-row">
           <button class="btn geel" id="btnKlopt">✓ Voorraad klopt</button>
           <button class="btn primair" id="btnOpslaan">Opslaan</button>
+        </div>
+        <div class="btn-row">
+          <button class="btn stil" id="btnBesteld">🛒 Markeer als besteld</button>
         </div>
         <div class="btn-row">
           <button class="btn stil" id="btnAnnuleer">Annuleren</button>
@@ -167,6 +175,10 @@
   <div class="cam-msg" id="camMsg">Richt de camera op de code</div>
   <div class="cam-bar">
     <button id="btnTorch" hidden>💡 Lamp</button>
+    <button class="cam-trigger" id="btnTrigger" aria-label="Scan de code in beeld">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3 8V5.5A2.5 2.5 0 0 1 5.5 3H8M16 3h2.5A2.5 2.5 0 0 1 21 5.5V8M21 16v2.5a2.5 2.5 0 0 1-2.5 2.5H16M8 21H5.5A2.5 2.5 0 0 1 3 18.5V16M7 12h10"/></svg>
+      Scan
+    </button>
     <button id="btnCamSluit">✕ Sluiten</button>
   </div>
 </div>
