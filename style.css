@@ -94,6 +94,7 @@ main {
   flex: 1;
   display: flex;
   flex-direction: column;
+  min-height: 0;
 }
 #scanIdle[hidden] { display: none; }
 @keyframes fadein { from { opacity: 0.4; } to { opacity: 1; } }
@@ -119,8 +120,7 @@ main {
   display: flex;
   flex-direction: column;
   align-items: center;
-  margin-top: auto; /* duwt de scanknop naar onderen, binnen duimbereik */
-  padding: 22px 0 10px;
+  padding: 14px 0 10px;
 }
 .scan-btn {
   width: 168px; height: 168px;
@@ -141,7 +141,7 @@ main {
 }
 .scan-btn:active { transform: scale(0.96); }
 .scan-btn svg { width: 52px; height: 52px; }
-.scan-hint { color: var(--muted); font-size: 0.85rem; margin-bottom: 16px; text-align: center; padding: 0 20px; }
+.scan-hint { color: var(--muted); font-size: 0.85rem; margin: 0 0 12px; text-align: center; padding: 0 20px; }
 
 /* ---------- Zoekbalk ---------- */
 .search-row { display: flex; gap: 8px; }
@@ -165,7 +165,16 @@ main {
   font-size: 1rem;
   cursor: pointer;
 }
-.search-results { margin-top: 10px; }
+/* resultaten vullen de ruimte boven de zoekbalk; nieuwste onderaan, dicht bij de balk */
+.search-results {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 10px;
+}
+.search-results > :first-child { margin-top: auto; }
 
 /* ---------- Camera ---------- */
 #camOverlay {
@@ -345,13 +354,17 @@ main {
   color: var(--muted);
   margin-bottom: 6px;
 }
-.stepper {
+/* Geteld & Bestellen naast elkaar; − en + werken op het geselecteerde veld */
+.telrij {
   display: flex;
   gap: 8px;
-  align-items: stretch;
+  align-items: flex-end;
+  margin-bottom: 12px;
 }
-.stepper button {
-  width: 56px;
+.telrij .step-btn {
+  flex: none;
+  width: 54px;
+  height: 46px;
   border: 1px solid var(--border);
   background: var(--surface-2);
   color: var(--text);
@@ -360,21 +373,29 @@ main {
   cursor: pointer;
   line-height: 1;
 }
-.stepper button:active { background: var(--surface-3); }
-.stepper input {
-  flex: 1;
+.telrij .step-btn:active { background: var(--surface-3); }
+.telveld { flex: 1; min-width: 0; }
+.telveld .lbl {
+  font-size: 0.78rem;
+  color: var(--muted);
+  margin-bottom: 5px;
+  text-align: center;
+}
+.telveld input {
+  width: 100%;
+  height: 46px;
   text-align: center;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-s);
   color: var(--text);
-  font-size: 1.25rem;
+  font-size: 1.2rem;
   font-weight: 600;
-  padding: 12px 6px;
+  padding: 0 6px;
   outline: none;
-  min-width: 0;
 }
-.stepper input:focus { border-color: var(--green); }
+.telveld.sel .lbl { color: var(--green); font-weight: 650; }
+.telveld.sel input, .telveld input:focus { border-color: var(--green); }
 textarea {
   width: 100%;
   background: var(--surface);
@@ -390,12 +411,12 @@ textarea {
 }
 textarea:focus { border-color: var(--green); }
 
-.btn-row { display: flex; gap: 10px; margin-top: 14px; }
+.btn-row { display: flex; gap: 10px; margin-top: 12px; }
 .btn {
   flex: 1;
   border: none;
   border-radius: var(--radius-s);
-  padding: 15px 12px;
+  padding: 11px 12px;
   font-size: 1rem;
   font-weight: 650;
   cursor: pointer;
@@ -474,6 +495,8 @@ th {
 }
 td { padding: 9px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
 tr:last-child td { border-bottom: none; }
+tr[data-key] { cursor: pointer; }
+tr[data-key]:active td { background: var(--surface-2); }
 td.num, th.num { text-align: right; }
 .tabel-wrap { overflow-x: auto; }
 .cred-kop {
@@ -488,6 +511,8 @@ td.num, th.num { text-align: right; }
 .set-row { margin-bottom: 16px; }
 .set-row .lbl { font-size: 0.85rem; margin-bottom: 6px; }
 .set-row .sub { font-size: 0.78rem; color: var(--muted); margin-top: 6px; }
+/* gemaskeerd tekstveld: oogt als wachtwoordveld, maar Chrome's wachtwoordmanager blijft eraf */
+input.masked { -webkit-text-security: disc; }
 .set-row input[type="password"], .set-row input[type="text"] {
   width: 100%;
   background: var(--bg);

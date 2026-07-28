@@ -4,7 +4,7 @@
  */
 'use strict';
 
-const VERSIE = '1.2.0';
+const VERSIE = '1.3.0';
 const DATA_REPO = 'flip-o0o-flow/magazijn-data';
 const API_BASE = 'https://api.github.com/repos/' + DATA_REPO + '/contents/';
 
@@ -322,6 +322,7 @@ function stopScanner() {
   if (camStream) { camStream.getTracks().forEach(t => t.stop()); camStream = null; }
   $('camVideo').srcObject = null;
   $('camOverlay').classList.remove('open');
+  if (updateWacht && $('artPanel').hidden) location.reload();
 }
 
 async function wisselTorch() {
@@ -390,6 +391,7 @@ function openPaneel(art, behoudBlader) {
   $('inpGeteld').value = bestaand && bestaand.g != null ? bestaand.g : '';
   $('inpBestellen').value = bestaand && bestaand.best != null ? bestaand.best : '';
   $('inpOpmerking').value = bestaand ? (bestaand.opm || '') : '';
+  zetActiefVeld('inpGeteld');
   $('btnKlopt').hidden = false;
   $('scanIdle').hidden = true;
   $('artPanel').hidden = false;
@@ -413,6 +415,7 @@ function openPaneelOnbekend(code, behoudBlader) {
   $('inpGeteld').value = bestaand && bestaand.g != null ? bestaand.g : '';
   $('inpBestellen').value = bestaand && bestaand.best != null ? bestaand.best : '';
   $('inpOpmerking').value = bestaand ? (bestaand.opm || '') : '';
+  zetActiefVeld('inpGeteld');
   $('btnKlopt').hidden = true;
   $('scanIdle').hidden = true;
   $('artPanel').hidden = false;
@@ -501,6 +504,14 @@ function wisselBesteld() {
   else { updateBladerUI(); updateBesteldKnop(); }
 }
 
+// ---------- geselecteerd telveld (− en + werken op dit veld) ----------
+let actiefVeld = 'inpGeteld';
+function zetActiefVeld(id) {
+  actiefVeld = id;
+  $('veldGeteld').classList.toggle('sel', id === 'inpGeteld');
+  $('veldBestellen').classList.toggle('sel', id === 'inpBestellen');
+}
+
 function veld(lbl, val, klasse) {
   return '<div class="art-field"><div class="lbl">' + lbl + '</div><div class="val ' + (klasse || '') + '">' + val + '</div></div>';
 }
@@ -510,6 +521,7 @@ function sluitPaneel() {
   huidigeKey = null;
   $('artPanel').hidden = true;
   $('scanIdle').hidden = false;
+  if (updateWacht) location.reload();
 }
 
 function leesGetal(id) {
@@ -624,6 +636,16 @@ function renderLijst() {
 }
 
 // ---------- overzicht ----------
+// rijen klikbaar maken: opent het artikelpaneel en laat < / > door de
+// artikelen bladeren in de volgorde van deze overzichtssectie
+function koppelOverzichtRijen(container) {
+  const rijen = container.querySelectorAll('tr[data-key]');
+  const keys = Array.from(rijen).map(r => r.getAttribute('data-key'));
+  rijen.forEach(r => {
+    r.onclick = () => { bladerKeys = keys.slice(); openViaKey(r.getAttribute('data-key')); };
+  });
+}
+
 function renderOverzicht() {
   const items = Object.values(telling.items);
   const verschillen = items.filter(it => !it.onb && it.g != null && it.g !== (parseInt(it.v, 10) || 0));
@@ -645,11 +667,12 @@ function renderOverzicht() {
     for (const it of verschillen.sort((a, b) => (a.l || '').localeCompare(b.l || ''))) {
       const sys = parseInt(it.v, 10) || 0;
       const d = it.g - sys;
-      h += '<tr><td><b>' + esc(it.a) + '</b><br><span style="color:var(--muted)">' + esc(it.o) + '</span></td>' +
+      h += '<tr data-key="' + esc(it.b) + '"><td><b>' + esc(it.a) + '</b><br><span style="color:var(--muted)">' + esc(it.o) + '</span></td>' +
         '<td>' + esc(it.l || '–') + '</td><td class="num">' + sys + '</td><td class="num">' + it.g + '</td>' +
         '<td class="num" style="color:var(--red);font-weight:600">' + (d > 0 ? '+' : '') + d + '</td></tr>';
     }
     $('ovVerschillen').innerHTML = h + '</table>';
+    koppelOverzichtRijen($('ovVerschillen'));
   }
 
   // bestellen, gegroepeerd per crediteur
@@ -674,7 +697,7 @@ function renderOverzicht() {
           : '<span class="badge groen">🛒 alles besteld</span>') + '</div>';
       h += '<div class="tabel-wrap"><table><tr><th>Artikel</th><th>Hun nummer</th><th>Locatie</th><th class="num">Aantal</th></tr>';
       for (const it of regels) {
-        h += '<tr' + (it.bsd ? ' class="rij-besteld"' : '') + '><td><b>' + esc(it.a || it.b) + '</b><br><span style="color:var(--muted)">' + esc(it.o) + '</span></td>' +
+        h += '<tr data-key="' + esc(it.b) + '"' + (it.bsd ? ' class="rij-besteld"' : '') + '><td><b>' + esc(it.a || it.b) + '</b><br><span style="color:var(--muted)">' + esc(it.o) + '</span></td>' +
           '<td>' + esc(it.h || it.f || '–') + '</td><td>' + esc(it.l || '–') + '</td>' +
           '<td class="num" style="font-weight:650">' +
           (it.bsd ? '<span style="color:var(--green)">🛒 ' + it.best + '</span>' : '<span style="color:var(--yellow)">' + it.best + '</span>') +
@@ -683,6 +706,7 @@ function renderOverzicht() {
       h += '</table></div>';
     }
     $('ovBestellen').innerHTML = h;
+    koppelOverzichtRijen($('ovBestellen'));
     $('ovBestellen').querySelectorAll('[data-kopie]').forEach(btn => {
       btn.onclick = () => {
         navigator.clipboard.writeText(btn.getAttribute('data-kopie'))
@@ -698,10 +722,11 @@ function renderOverzicht() {
   } else {
     let h = '<table><tr><th>Artikel</th><th>Locatie</th><th>Opmerking</th></tr>';
     for (const it of opmerkingen) {
-      h += '<tr><td><b>' + esc(it.a || it.b) + '</b><br><span style="color:var(--muted)">' + esc(it.o) + '</span></td>' +
+      h += '<tr data-key="' + esc(it.b) + '"><td><b>' + esc(it.a || it.b) + '</b><br><span style="color:var(--muted)">' + esc(it.o) + '</span></td>' +
         '<td>' + esc(it.l || '–') + '</td><td>' + esc(it.opm) + '</td></tr>';
     }
     $('ovOpmerkingen').innerHTML = h + '</table>';
+    koppelOverzichtRijen($('ovOpmerkingen'));
   }
 }
 
@@ -811,10 +836,13 @@ function bindEvents() {
   $('btnZoek').addEventListener('click', handmatigZoeken);
   $('zoekInput').addEventListener('keydown', e => { if (e.key === 'Enter') handmatigZoeken(); });
 
-  $('gMin').addEventListener('click', () => stepper('inpGeteld', -1));
-  $('gPlus').addEventListener('click', () => stepper('inpGeteld', 1));
-  $('bMin').addEventListener('click', () => stepper('inpBestellen', -1));
-  $('bPlus').addEventListener('click', () => stepper('inpBestellen', 1));
+  $('inpGeteld').addEventListener('focus', () => zetActiefVeld('inpGeteld'));
+  $('inpBestellen').addEventListener('focus', () => zetActiefVeld('inpBestellen'));
+  // pointerdown niet laten doorgaan: zo blijft de focus (en het toetsenbord) op het invoerveld
+  $('stMin').addEventListener('pointerdown', e => e.preventDefault());
+  $('stPlus').addEventListener('pointerdown', e => e.preventDefault());
+  $('stMin').addEventListener('click', () => stepper(actiefVeld, -1));
+  $('stPlus').addEventListener('click', () => stepper(actiefVeld, 1));
 
   $('btnOpslaan').addEventListener('click', () => slaOp(false));
   $('btnKlopt').addEventListener('click', () => slaOp(true));
@@ -851,6 +879,34 @@ function bindEvents() {
   });
 }
 
+// ---------- service worker & app-updates ----------
+let updateWacht = false;
+
+function pasUpdateToe() {
+  // niet verversen midden in een open artikel of tijdens het scannen
+  if (!$('artPanel').hidden || camActief) {
+    updateWacht = true;
+    toast('Nieuwe versie gedownload — wordt toegepast zodra je klaar bent');
+    return;
+  }
+  location.reload();
+}
+
+function registreerSw() {
+  if (!('serviceWorker' in navigator)) return;
+  let hadController = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadController) { hadController = true; return; } // allereerste installatie
+    pasUpdateToe();
+  });
+  navigator.serviceWorker.register('sw.js').then(reg => {
+    // bij het (her)openen van de app controleren of er een nieuwe versie online staat
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') reg.update();
+    });
+  }).catch(() => { /* offline; volgende keer opnieuw proberen */ });
+}
+
 // ---------- start ----------
 function init() {
   laadLokaal();
@@ -876,7 +932,7 @@ function init() {
     zetStatus('err', 'Geen token');
   }
 
-  if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
+  registreerSw();
 }
 
 init();
