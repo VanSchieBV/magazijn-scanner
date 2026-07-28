@@ -4,7 +4,7 @@
  */
 'use strict';
 
-const VERSIE = '1.3.1';
+const VERSIE = '1.4.0';
 const DATA_REPO = 'VanSchieBV/magazijn-data';
 const API_BASE = 'https://api.github.com/repos/' + DATA_REPO + '/contents/';
 
@@ -22,6 +22,9 @@ let syncBezig = false;
 let syncNodig = false;
 
 const $ = (id) => document.getElementById(id);
+// verwijderde registraties blijven als tombstone ({del:true, ts}) staan zodat de
+// verwijdering meesynct naar andere apparaten; overal via levend() filteren
+const levend = (it) => (it && !it.del ? it : null);
 const esc = (s) => String(s == null ? '' : s)
   .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
@@ -373,7 +376,7 @@ function toonKiezer(treffers, code) {
 function openPaneel(art, behoudBlader) {
   huidigArt = art;
   huidigeKey = art.b;
-  const bestaand = telling.items[huidigeKey];
+  const bestaand = levend(telling.items[huidigeKey]);
   $('artKop').innerHTML =
     '<div class="art-title">' + esc(art.o) + '</div>' +
     '<div class="art-nr">' + esc(art.a) +
@@ -392,6 +395,7 @@ function openPaneel(art, behoudBlader) {
   $('inpBestellen').value = bestaand && bestaand.best != null ? bestaand.best : '';
   $('inpOpmerking').value = bestaand ? (bestaand.opm || '') : '';
   zetActiefVeld('inpGeteld');
+  $('btnVerwijder').hidden = !bestaand;
   $('btnKlopt').hidden = false;
   $('scanIdle').hidden = true;
   $('artPanel').hidden = false;
@@ -405,7 +409,7 @@ function openPaneel(art, behoudBlader) {
 function openPaneelOnbekend(code, behoudBlader) {
   huidigArt = { b: code, a: '', o: 'Onbekende code', c: '', f: '', h: '', l: '', v: '', onb: true };
   huidigeKey = code;
-  const bestaand = telling.items[huidigeKey];
+  const bestaand = levend(telling.items[huidigeKey]);
   $('artKop').innerHTML =
     '<div class="art-title">Onbekende code <span class="badge rood">niet in artikellijst</span></div>' +
     '<div class="art-nr">' + esc(code) +
@@ -416,6 +420,7 @@ function openPaneelOnbekend(code, behoudBlader) {
   $('inpBestellen').value = bestaand && bestaand.best != null ? bestaand.best : '';
   $('inpOpmerking').value = bestaand ? (bestaand.opm || '') : '';
   zetActiefVeld('inpGeteld');
+  $('btnVerwijder').hidden = !bestaand;
   $('btnKlopt').hidden = true;
   $('scanIdle').hidden = true;
   $('artPanel').hidden = false;
@@ -439,6 +444,7 @@ function bindKopieKnoppen(container, melding) {
 // ---------- bladeren door getelde artikelen ----------
 function bouwBlader() {
   bladerKeys = Object.entries(telling.items)
+    .filter(x => !x[1].del)
     .sort((x, y) => (y[1].ts || 0) - (x[1].ts || 0))
     .map(x => x[0]);
 }
@@ -460,7 +466,7 @@ function blader(richting) {
 }
 
 function openViaKey(key) {
-  const it = telling.items[key];
+  const it = levend(telling.items[key]);
   if (!it) { bouwBlader(); updateBladerUI(); return; }
   const art = (artIndex.get(it.b) || [])[0];
   if (art) openPaneel(art, true); else openPaneelOnbekend(it.b, true);
@@ -469,7 +475,7 @@ function openViaKey(key) {
 // ---------- besteld-markering ----------
 function updateBesteldKnop() {
   const btn = $('btnBesteld');
-  const bestaand = telling.items[huidigeKey];
+  const bestaand = levend(telling.items[huidigeKey]);
   if (bestaand && bestaand.bsd) {
     btn.textContent = '🛒 Besteld ✓ — tik om ongedaan te maken';
     btn.classList.add('besteld-actief');
@@ -482,7 +488,7 @@ function updateBesteldKnop() {
 
 function wisselBesteld() {
   if (!huidigArt) return;
-  const bestaand = telling.items[huidigeKey];
+  const bestaand = levend(telling.items[huidigeKey]);
   if (bestaand && bestaand.bsd) {
     delete bestaand.bsd;
     bestaand.ts = Date.now();
@@ -510,6 +516,25 @@ function zetActiefVeld(id) {
   actiefVeld = id;
   $('veldGeteld').classList.toggle('sel', id === 'inpGeteld');
   $('veldBestellen').classList.toggle('sel', id === 'inpBestellen');
+}
+
+// ---------- registratie verwijderen ----------
+function verwijderRegistratie() {
+  const bestaand = levend(telling.items[huidigeKey]);
+  if (!bestaand) return;
+  const naam = huidigArt ? (huidigArt.a || huidigArt.b) : huidigeKey;
+  if (!confirm(naam + ' uit de telling verwijderen?\n\nGeteld, bestellen en opmerking van dit artikel worden gewist (op alle apparaten).')) return;
+  // tombstone i.p.v. echt wissen, anders komt het item bij de volgende sync terug
+  telling.items[huidigeKey] = { b: bestaand.b, ts: Date.now(), del: true };
+  bewaarTelling();
+  planSync();
+  renderAlles();
+  toast('🗑 ' + naam + ' uit de telling verwijderd');
+  // binnen de huidige bladervolgorde doorschuiven naar het volgende artikel
+  const idx = bladerIdx;
+  bladerKeys = bladerKeys.filter(k => k !== huidigeKey && levend(telling.items[k]));
+  if (bladerKeys.length) openViaKey(bladerKeys[Math.min(Math.max(idx, 0), bladerKeys.length - 1)]);
+  else sluitPaneel();
 }
 
 function veld(lbl, val, klasse) {
@@ -551,7 +576,11 @@ function slaOp(kloptDirect) {
   const art = huidigArt;
   const entry = bouwEntry(kloptDirect);
   if (entry.g == null && entry.best == null && !entry.opm) {
-    toast('Niets ingevuld — vul geteld, bestellen of een opmerking in', true);
+    if (levend(telling.items[huidigeKey])) {
+      toast('Alles leeg — gebruik 🗑 om de registratie te verwijderen', true);
+    } else {
+      toast('Niets ingevuld — vul geteld, bestellen of een opmerking in', true);
+    }
     return;
   }
   telling.items[huidigeKey] = entry;
@@ -602,7 +631,7 @@ function handmatigZoeken() {
 
 // ---------- lijst-weergave ----------
 function renderLijst() {
-  const items = Object.values(telling.items).sort((a, b2) => (b2.ts || 0) - (a.ts || 0));
+  const items = Object.values(telling.items).filter(it => !it.del).sort((a, b2) => (b2.ts || 0) - (a.ts || 0));
   $('lijstSub').textContent = items.length ? items.length + ' artikelen geregistreerd' : 'Nog niets geteld';
   const badge = $('navBadge');
   badge.hidden = !items.length;
@@ -647,7 +676,7 @@ function koppelOverzichtRijen(container) {
 }
 
 function renderOverzicht() {
-  const items = Object.values(telling.items);
+  const items = Object.values(telling.items).filter(it => !it.del);
   const verschillen = items.filter(it => !it.onb && it.g != null && it.g !== (parseInt(it.v, 10) || 0));
   const bestellen = items.filter(it => it.best != null && it.best > 0);
   const opmerkingen = items.filter(it => it.opm);
@@ -731,7 +760,7 @@ function renderOverzicht() {
 }
 
 function downloadCsv() {
-  const items = Object.values(telling.items).sort((a, b) => (a.l || '').localeCompare(b.l || ''));
+  const items = Object.values(telling.items).filter(it => !it.del).sort((a, b) => (a.l || '').localeCompare(b.l || ''));
   if (!items.length) { toast('Nog niets geteld', true); return; }
   const kol = ['Barcode','Artikelnummer','Korte omschrijving','Fabrikantcode','Hun nummer','Locatie','Tech. Voorraad','Geteld','Crediteur','Bestellen','Besteld','Opmerking'];
   const cel = (v) => {
@@ -755,7 +784,7 @@ function downloadCsv() {
 
 // ---------- telling afronden ----------
 async function rondAf() {
-  const n = Object.keys(telling.items).length;
+  const n = Object.values(telling.items).filter(it => !it.del).length;
   if (!n) { toast('De telling is al leeg', true); return; }
   if (!confirm('Telling afronden?\n\n' + n + ' regels worden gearchiveerd in de cloud en de lijst wordt leeggemaakt.')) return;
   if (!getToken() || !navigator.onLine) { toast('Afronden kan alleen online', true); return; }
@@ -766,7 +795,9 @@ async function rondAf() {
     const stamp = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' +
       String(d.getDate()).padStart(2, '0') + '_' + String(d.getHours()).padStart(2, '0') +
       String(d.getMinutes()).padStart(2, '0');
-    await ghPut('archief/telling-' + stamp + '.json', JSON.stringify({ afgerond: d.toISOString(), items: telling.items }), null, 'Telling afgerond');
+    const archiefItems = {};
+    for (const [k, v] of Object.entries(telling.items)) { if (!v.del) archiefItems[k] = v; }
+    await ghPut('archief/telling-' + stamp + '.json', JSON.stringify({ afgerond: d.toISOString(), items: archiefItems }), null, 'Telling afgerond');
     const info = await ghDirInfo('telling.json');
     await ghPut('telling.json', JSON.stringify({ items: {} }), info ? info.sha : null, 'Telling geleegd na afronden');
     telling = { items: {} };
@@ -847,6 +878,7 @@ function bindEvents() {
   $('btnOpslaan').addEventListener('click', () => slaOp(false));
   $('btnKlopt').addEventListener('click', () => slaOp(true));
   $('btnAnnuleer').addEventListener('click', sluitPaneel);
+  $('btnVerwijder').addEventListener('click', verwijderRegistratie);
   $('btnBesteld').addEventListener('click', wisselBesteld);
   $('btnVorig').addEventListener('click', () => blader(-1));
   $('btnVolgend').addEventListener('click', () => blader(1));
@@ -919,7 +951,7 @@ function init() {
   renderLijst();
 
   // op een pc met groot scherm direct het overzicht tonen
-  if (window.matchMedia('(pointer: fine)').matches && window.innerWidth > 900 && Object.keys(telling.items).length) {
+  if (window.matchMedia('(pointer: fine)').matches && window.innerWidth > 900 && Object.values(telling.items).some(it => !it.del)) {
     toonView('overzicht');
   }
 
