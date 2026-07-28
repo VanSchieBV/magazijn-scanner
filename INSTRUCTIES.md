@@ -39,8 +39,9 @@ Het token wordt alleen lokaal op het apparaat bewaard.
 
 - Maak een bladwijzer naar de app-URL (voor het overzicht van telverschillen en bestellingen).
 - **Artikellijst bijwerken:** dubbelklik de snelkoppeling **"Artikellijst bijwerken"** op het
-  bureaublad. Die leest `Bestellijst Cloud.xlsx` (Desktop\Tijdelijk) en zet de nieuwe
-  artikellijst in de cloud. De app haalt de lijst automatisch op bij de volgende start.
+  bureaublad. Die leest `Export Artikelen.xlsx` (of `.csv`) uit
+  `C:\Users\td\Projecten_AI\Magazijn scanner\Bron` en zet de nieuwe artikellijst in de cloud.
+  De app haalt de lijst automatisch op bij de volgende start.
 
 ## Dagelijks gebruik
 

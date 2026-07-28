@@ -7,7 +7,8 @@ param([string]$Bestand)
 
 $ErrorActionPreference = 'Stop'
 $Repo = 'flip-o0o-flow/magazijn-data'
-$StandaardBestand = 'C:\Users\td\Desktop\Tijdelijk\Bestellijst Cloud.xlsx'
+# Bronmap: nieuwste "Export Artikelen.xlsx" of ".csv" wint (csv komt er later automatisch)
+$BronMap = 'C:\Users\td\Projecten_AI\Magazijn scanner\Bron'
 
 function Wacht {
     if ($env:MGZ_STIL) { return }
@@ -20,14 +21,17 @@ Write-Host '=== Artikellijst bijwerken (Magazijn Scanner) ===' -ForegroundColor 
 
 # --- 1. bronbestand bepalen ---
 if (-not $Bestand) {
-    if (Test-Path $StandaardBestand) {
-        $Bestand = $StandaardBestand
+    $kandidaten = @(Get-ChildItem -Path (Join-Path $BronMap 'Export Artikelen.*') -ErrorAction SilentlyContinue |
+        Where-Object { $_.Extension -in '.xlsx', '.csv' } |
+        Sort-Object LastWriteTime -Descending)
+    if ($kandidaten.Count) {
+        $Bestand = $kandidaten[0].FullName
     } else {
         Add-Type -AssemblyName System.Windows.Forms
         $dlg = New-Object System.Windows.Forms.OpenFileDialog
         $dlg.Title = 'Kies de export (xlsx of csv)'
         $dlg.Filter = 'Excel of CSV|*.xlsx;*.csv'
-        $dlg.InitialDirectory = [Environment]::GetFolderPath('Desktop')
+        $dlg.InitialDirectory = $BronMap
         if ($dlg.ShowDialog() -ne 'OK') { Write-Host 'Geannuleerd.'; exit 1 }
         $Bestand = $dlg.FileName
     }
