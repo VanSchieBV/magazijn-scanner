@@ -719,14 +719,14 @@ function renderOverzicht() {
       const nogTeDoen = regels.filter(it => !it.bsd);
       h += '<div class="cred-kop"><span class="naam">' + esc(cred) + '</span>' +
         (nogTeDoen.length ? '' : '<span class="badge groen">🛒 alles besteld</span>') + '</div>';
-      h += '<div class="tabel-wrap"><table><tr><th>Artikel</th><th>Hun nummer</th><th>Locatie</th><th class="num">Aantal</th></tr>';
+      h += '<div class="tabel-wrap"><table class="bestel-tabel"><tr><th>Artikel</th><th>Hun nummer</th><th>Locatie</th><th class="num">Aantal</th><th>Besteld</th></tr>';
       for (const it of regels) {
         const hun = it.h || it.f || '';
         h += '<tr data-key="' + esc(it.b) + '"' + (it.bsd ? ' class="rij-besteld"' : '') + '><td><b class="art-kopie" data-kopieer="' + esc(it.a || it.b) + '">' + esc(it.a || it.b) + '</b><br><span style="color:var(--muted)">' + esc(it.o) + '</span></td>' +
           (hun ? '<td class="hun-kopie" data-kopieer="' + esc(hun) + '">' + esc(hun) + '</td>' : '<td>–</td>') + '<td>' + esc(it.l || '–') + '</td>' +
-          '<td class="num" style="font-weight:650">' +
-          (it.bsd ? '<span style="color:var(--green)">🛒 ' + it.best + '</span>' : '<span style="color:var(--yellow)">' + it.best + '</span>') +
-          '</td></tr>';
+          '<td class="num"><input type="text" class="ov-aantal" data-key="' + esc(it.b) + '" inputmode="numeric" maxlength="4" value="' + it.best + '"></td>' +
+          '<td class="besteld-cel"><input type="checkbox" class="ov-besteld" data-key="' + esc(it.b) + '"' + (it.bsd ? ' checked' : '') + '>' +
+          '<input type="text" class="ov-ink" data-key="' + esc(it.b) + '" inputmode="numeric" maxlength="8" value="' + esc(it.ink || '') + '"></td></tr>';
       }
       h += '</table></div>';
     }
@@ -739,6 +739,45 @@ function renderOverzicht() {
         navigator.clipboard.writeText(el.getAttribute('data-kopieer'))
           .then(() => toast('Gekopieerd: ' + el.getAttribute('data-kopieer')))
           .catch(() => toast('Kopiëren mislukt', true));
+      };
+    });
+    // aantal, besteld-vinkje en inkoopnummer direct in de tabel bewerken
+    const zetItem = (key, fn) => {
+      const it = telling.items[key];
+      if (!it) return;
+      fn(it);
+      it.ts = Date.now();
+      bewaarTelling();
+      planSync();
+      renderAlles();
+    };
+    $('ovBestellen').querySelectorAll('.ov-aantal').forEach(inp => {
+      inp.onclick = (e) => e.stopPropagation();
+      inp.onblur = () => { if (renderUitgesteld) renderAlles(); };
+      inp.onchange = () => {
+        const n = parseInt(inp.value, 10);
+        if (!isNaN(n) && n > 0) zetItem(inp.getAttribute('data-key'), it => { it.best = n; });
+        else { toast('Aantal moet minimaal 1 zijn — pas het aan via het artikel zelf om te verwijderen', true); inp.blur(); renderAlles(); }
+      };
+    });
+    $('ovBestellen').querySelectorAll('.ov-besteld').forEach(cb => {
+      cb.onclick = (e) => e.stopPropagation();
+      cb.onchange = () => {
+        const aan = cb.checked;
+        zetItem(cb.getAttribute('data-key'), it => {
+          if (aan) it.bsd = Date.now(); else delete it.bsd;
+        });
+        toast(aan ? '🛒 Gemarkeerd als besteld' : 'Bestelmarkering verwijderd');
+      };
+    });
+    $('ovBestellen').querySelectorAll('.ov-ink').forEach(inp => {
+      inp.onclick = (e) => e.stopPropagation();
+      inp.onblur = () => { if (renderUitgesteld) renderAlles(); };
+      inp.onchange = () => {
+        const v = inp.value.trim();
+        zetItem(inp.getAttribute('data-key'), it => {
+          if (v) it.ink = v; else delete it.ink;
+        });
       };
     });
   }
@@ -760,7 +799,7 @@ function renderOverzicht() {
 function downloadCsv() {
   const items = Object.values(telling.items).filter(it => !it.del).sort((a, b) => (a.l || '').localeCompare(b.l || ''));
   if (!items.length) { toast('Nog niets geteld', true); return; }
-  const kol = ['Barcode','Artikelnummer','Korte omschrijving','Fabrikantcode','Hun nummer','Locatie','Tech. Voorraad','Geteld','Crediteur','Bestellen','Besteld','Opmerking'];
+  const kol = ['Barcode','Artikelnummer','Korte omschrijving','Fabrikantcode','Hun nummer','Locatie','Tech. Voorraad','Geteld','Crediteur','Bestellen','Besteld','Inkoopnummer','Opmerking'];
   const cel = (v) => {
     v = String(v == null ? '' : v);
     return /[;"\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
@@ -769,7 +808,7 @@ function downloadCsv() {
   for (const it of items) {
     regels.push([it.b, it.a, it.o, it.f, it.h, it.l, it.v,
       it.g != null ? it.g : '', it.c, it.best != null ? it.best : '',
-      it.bsd ? 'ja' : '', it.opm].map(cel).join(';'));
+      it.bsd ? 'ja' : '', it.ink || '', it.opm].map(cel).join(';'));
   }
   const blob = new Blob(['﻿' + regels.join('\r\n')], { type: 'text/csv;charset=utf-8' });
   const a = document.createElement('a');
@@ -827,7 +866,13 @@ function toonView(naam) {
   if (naam === 'lijst') renderLijst();
 }
 
+// niet renderen terwijl er in een overzicht-veldje getypt wordt (sync zou de
+// invoer wissen); de render wordt dan uitgesteld tot het veld wordt verlaten
+let renderUitgesteld = false;
 function renderAlles() {
+  const a = document.activeElement;
+  if (a && a.matches && a.matches('.ov-aantal, .ov-ink')) { renderUitgesteld = true; return; }
+  renderUitgesteld = false;
   renderLijst();
   if ($('view-overzicht').classList.contains('active')) renderOverzicht();
 }

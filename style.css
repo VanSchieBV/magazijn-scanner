@@ -505,6 +505,36 @@ td.hun-kopie::after { content: ' ⧉'; color: var(--muted); font-size: 0.85em; }
 /* Artikelnummer in de besteltabel: tik = kopieer, tekst blijft wit en dikgedrukt */
 b.art-kopie { text-decoration: underline dotted; text-underline-offset: 3px; }
 b.art-kopie::after { content: ' ⧉'; color: var(--muted); font-size: 0.85em; font-weight: 400; }
+/* invoer in de besteltabel: aantal, besteld-vinkje en inkoopnummer */
+input.ov-aantal, input.ov-ink {
+  font: inherit;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  padding: 4px 6px;
+  vertical-align: middle;
+}
+input.ov-aantal { width: 3.4em; text-align: right; font-weight: 650; color: var(--yellow); }
+tr.rij-besteld input.ov-aantal { color: var(--green); }
+input.ov-ink { width: 6.5em; margin-left: 6px; font-size: 0.95rem; }
+/* vaste kolombreedtes: elke crediteurtabel identiek, Besteld altijd uiterst rechts.
+   Artikel en Hun nummer delen de resterende ruimte 50/50 (geen width = gelijke
+   verdeling bij table-layout:fixed) — posities schuiven dus nooit mee met de inhoud. */
+table.bestel-tabel { table-layout: fixed; width: 100%; min-width: 34rem; }
+table.bestel-tabel th { white-space: nowrap; }
+table.bestel-tabel th:nth-child(3) { width: 4.2rem; }  /* Locatie */
+table.bestel-tabel th:nth-child(4) { width: 3.4rem; }  /* Aantal */
+table.bestel-tabel th:nth-child(5) { width: 10rem; }   /* Besteld */
+table.bestel-tabel td { overflow-wrap: break-word; }
+table.bestel-tabel th:nth-child(5) { text-align: right; }
+td.besteld-cel { white-space: nowrap; text-align: right; }
+td.besteld-cel input[type="checkbox"] {
+  width: 20px;
+  height: 20px;
+  accent-color: var(--green-strong);
+  vertical-align: middle;
+}
 .tabel-wrap { overflow-x: auto; }
 .cred-kop {
   display: flex;
