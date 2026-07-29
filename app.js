@@ -717,13 +717,8 @@ function renderOverzicht() {
     for (const cred of Object.keys(groepen).sort()) {
       const regels = groepen[cred];
       const nogTeDoen = regels.filter(it => !it.bsd);
-      const kopieTekst = nogTeDoen.map(it =>
-        it.best + 'x ' + (it.a || it.b) + ' — ' + it.o + (it.h ? ' (hun nr: ' + it.h + ')' : '')
-      ).join('\n');
       h += '<div class="cred-kop"><span class="naam">' + esc(cred) + '</span>' +
-        (nogTeDoen.length
-          ? '<button class="btn stil klein" data-kopie="' + esc(kopieTekst) + '">Kopieer</button>'
-          : '<span class="badge groen">🛒 alles besteld</span>') + '</div>';
+        (nogTeDoen.length ? '' : '<span class="badge groen">🛒 alles besteld</span>') + '</div>';
       h += '<div class="tabel-wrap"><table><tr><th>Artikel</th><th>Hun nummer</th><th>Locatie</th><th class="num">Aantal</th></tr>';
       for (const it of regels) {
         const hun = it.h || it.f || '';
@@ -737,13 +732,6 @@ function renderOverzicht() {
     }
     $('ovBestellen').innerHTML = h;
     koppelOverzichtRijen($('ovBestellen'));
-    $('ovBestellen').querySelectorAll('[data-kopie]').forEach(btn => {
-      btn.onclick = () => {
-        navigator.clipboard.writeText(btn.getAttribute('data-kopie'))
-          .then(() => toast('Bestellijst gekopieerd'))
-          .catch(() => toast('Kopiëren mislukt', true));
-      };
-    });
     // tik op Hun nummer kopieert alleen dat nummer, zonder de rij te openen
     $('ovBestellen').querySelectorAll('td[data-hun]').forEach(td => {
       td.onclick = (e) => {
