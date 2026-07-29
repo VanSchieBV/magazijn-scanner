@@ -960,10 +960,13 @@ function bindEvents() {
   $('inpGeteld').addEventListener('focus', () => zetActiefVeld('inpGeteld'));
   $('inpBestellen').addEventListener('focus', () => zetActiefVeld('inpBestellen'));
   // pointerdown niet laten doorgaan: zo blijft de focus (en het toetsenbord) op het invoerveld
-  $('stMin').addEventListener('pointerdown', e => e.preventDefault());
-  $('stPlus').addEventListener('pointerdown', e => e.preventDefault());
-  $('stMin').addEventListener('click', () => stepper(actiefVeld, -1));
-  $('stPlus').addEventListener('click', () => stepper(actiefVeld, 1));
+  document.querySelectorAll('.stap').forEach(btn => {
+    btn.addEventListener('pointerdown', e => e.preventDefault());
+    btn.addEventListener('click', () => {
+      stepper(btn.dataset.inp, parseInt(btn.dataset.d, 10));
+      zetActiefVeld(btn.dataset.inp);
+    });
+  });
 
   $('btnOpslaan').addEventListener('click', () => slaOp(false));
   $('btnKlopt').addEventListener('click', () => slaOp(true));

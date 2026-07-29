@@ -375,19 +375,6 @@ main {
   align-items: flex-end;
   margin-bottom: 12px;
 }
-.telrij .step-btn {
-  flex: none;
-  width: 54px;
-  height: 46px;
-  border: 1px solid var(--border);
-  background: var(--surface-2);
-  color: var(--text);
-  border-radius: var(--radius-s);
-  font-size: 1.5rem;
-  cursor: pointer;
-  line-height: 1;
-}
-.telrij .step-btn:active { background: var(--surface-3); }
 .telveld { flex: 1; min-width: 0; }
 .telveld .lbl {
   font-size: 0.78rem;
@@ -395,21 +382,45 @@ main {
   margin-bottom: 5px;
   text-align: center;
 }
-.telveld input {
-  width: 100%;
+/* − en + binnen het kader van het invoerveld, elk veld zijn eigen knoppen */
+.stap-veld {
+  display: flex;
+  align-items: stretch;
   height: 46px;
-  text-align: center;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-s);
+  overflow: hidden;
+}
+.stap-veld .stap {
+  flex: none;
+  width: 44px;
+  border: none;
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 1.35rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+.stap-veld .stap:active { background: var(--surface-3); }
+.telveld input {
+  flex: 1;
+  width: 100%;
+  min-width: 0;
+  text-align: center;
+  background: none;
+  border: none;
   color: var(--text);
   font-size: 1.2rem;
   font-weight: 600;
-  padding: 0 6px;
+  padding: 0 4px;
   outline: none;
 }
+.telveld input::-webkit-outer-spin-button,
+.telveld input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 .telveld.sel .lbl { color: var(--green); font-weight: 650; }
-.telveld.sel input, .telveld input:focus { border-color: var(--green); }
+.telveld.sel .stap-veld, .stap-veld:focus-within { border-color: var(--green); }
 textarea {
   width: 100%;
   background: var(--surface);

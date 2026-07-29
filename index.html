@@ -59,16 +59,22 @@
         <div class="art-grid" id="artGrid"></div>
 
         <div class="telrij">
-          <button class="step-btn" id="stMin" aria-label="Eén minder">−</button>
           <div class="telveld sel" id="veldBestellen">
             <div class="lbl">Bestellen</div>
-            <input type="number" id="inpBestellen" inputmode="numeric" placeholder="–">
+            <div class="stap-veld">
+              <button type="button" class="stap" data-inp="inpBestellen" data-d="-1" aria-label="Eén minder">−</button>
+              <input type="number" id="inpBestellen" inputmode="numeric" placeholder="–">
+              <button type="button" class="stap" data-inp="inpBestellen" data-d="1" aria-label="Eén meer">+</button>
+            </div>
           </div>
           <div class="telveld" id="veldGeteld">
             <div class="lbl">Geteld</div>
-            <input type="number" id="inpGeteld" inputmode="numeric" placeholder="–">
+            <div class="stap-veld">
+              <button type="button" class="stap" data-inp="inpGeteld" data-d="-1" aria-label="Eén minder">−</button>
+              <input type="number" id="inpGeteld" inputmode="numeric" placeholder="–">
+              <button type="button" class="stap" data-inp="inpGeteld" data-d="1" aria-label="Eén meer">+</button>
+            </div>
           </div>
-          <button class="step-btn" id="stPlus" aria-label="Eén meer">+</button>
         </div>
 
         <div class="btn-row">
