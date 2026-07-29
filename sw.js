@@ -1,5 +1,5 @@
 /* Service worker — bij elke wijziging aan de app: VERSION ophogen! */
-const VERSION = 'mgz-v1.8.1';
+const VERSION = 'mgz-v1.8.2';
 const SHELL = [
   './',
   'index.html',

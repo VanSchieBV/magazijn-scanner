@@ -526,13 +526,13 @@ function verwijderRegistratie() {
   const bestaand = levend(telling.items[huidigeKey]);
   if (!bestaand) return;
   const naam = huidigArt ? (huidigArt.a || huidigArt.b) : huidigeKey;
-  if (!confirm(naam + ' uit de telling verwijderen?\n\nGeteld, bestellen en opmerking van dit artikel worden gewist (op alle apparaten).')) return;
+  if (!confirm(naam + ' uit de controle verwijderen?\n\nGeteld, bestellen en opmerking van dit artikel worden gewist (op alle apparaten).')) return;
   // tombstone i.p.v. echt wissen, anders komt het item bij de volgende sync terug
   telling.items[huidigeKey] = { b: bestaand.b, ts: Date.now(), del: true };
   bewaarTelling();
   planSync();
   renderAlles();
-  toast('🗑 ' + naam + ' uit de telling verwijderd');
+  toast('🗑 ' + naam + ' uit de controle verwijderd');
   // binnen de huidige bladervolgorde doorschuiven naar het volgende artikel
   const idx = bladerIdx;
   bladerKeys = bladerKeys.filter(k => k !== huidigeKey && levend(telling.items[k]));
@@ -673,7 +673,7 @@ function maakLijstItem(it) {
     bewaarTelling();
     planSync();
     renderAlles();
-    toast('🗑 ' + (it.a || it.b) + ' uit de telling verwijderd');
+    toast('🗑 ' + (it.a || it.b) + ' uit de controle verwijderd');
   };
   return el;
 }
@@ -701,13 +701,13 @@ function renderLijst() {
     kop.innerHTML = '<span>Klaar · ' + klaar.length + '</span>' +
       '<button class="btn stil klein" id="btnWisKlaar">🗑 Verwijder afgevinkte</button>';
     kop.querySelector('#btnWisKlaar').onclick = () => {
-      if (!confirm(klaar.length + ' afgevinkte artikel(en) uit de telling verwijderen?\n\nGeteld, bestellen en opmerkingen van deze artikelen worden gewist (op alle apparaten).')) return;
+      if (!confirm(klaar.length + ' afgevinkte artikel(en) uit de controle verwijderen?\n\nGeteld, bestellen en opmerkingen van deze artikelen worden gewist (op alle apparaten).')) return;
       const nu = Date.now();
       for (const it of klaar) telling.items[it.b] = { b: it.b, ts: nu, del: true };
       bewaarTelling();
       planSync();
       renderAlles();
-      toast('🗑 ' + klaar.length + ' artikel(en) uit de telling verwijderd');
+      toast('🗑 ' + klaar.length + ' artikel(en) uit de controle verwijderd');
     };
     div.appendChild(kop);
     for (const it of klaar) div.appendChild(maakLijstItem(it));
@@ -872,8 +872,8 @@ function downloadCsv() {
 // ---------- telling afronden ----------
 async function rondAf() {
   const n = Object.values(telling.items).filter(it => !it.del).length;
-  if (!n) { toast('De telling is al leeg', true); return; }
-  if (!confirm('Telling afronden?\n\n' + n + ' regels worden gearchiveerd in de cloud en de lijst wordt leeggemaakt.')) return;
+  if (!n) { toast('De controle is al leeg', true); return; }
+  if (!confirm('Controle afronden?\n\n' + n + ' regels worden gearchiveerd in de cloud en de lijst wordt leeggemaakt.')) return;
   if (!getToken() || !navigator.onLine) { toast('Afronden kan alleen online', true); return; }
   try {
     zetStatus('busy', 'Archiveren…');
@@ -891,7 +891,7 @@ async function rondAf() {
     bewaarTelling();
     renderAlles();
     zetStatus('ok', 'Gesynct');
-    toast('Telling gearchiveerd en leeggemaakt');
+    toast('Controle gearchiveerd en leeggemaakt');
   } catch (e) {
     zetStatus('err', 'Fout');
     toast('Afronden mislukt: ' + e.message, true);
