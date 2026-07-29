@@ -457,6 +457,35 @@ textarea:focus { border-color: var(--green); }
 .item .t2 { font-size: 0.8rem; color: var(--muted); margin-top: 2px; }
 .item .right { text-align: right; flex: none; }
 
+/* afvinken in de gescand-lijst */
+.item input.lijst-klaar {
+  width: 20px;
+  height: 20px;
+  flex: none;
+  accent-color: var(--green-strong);
+}
+.item.klaar { opacity: 0.55; background: var(--bg); }
+.item .lijst-del {
+  flex: none;
+  background: none;
+  border: none;
+  color: var(--red);
+  font-size: 1.05rem;
+  padding: 6px 8px;
+  cursor: pointer;
+}
+.klaar-kop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 18px 0 10px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
 .leeg-melding {
   text-align: center;
   color: var(--muted);

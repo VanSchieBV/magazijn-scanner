@@ -630,9 +630,58 @@ function handmatigZoeken() {
 }
 
 // ---------- lijst-weergave ----------
+function maakLijstItem(it) {
+  const verschil = it.g != null && String(it.g) !== String(parseInt(it.v, 10) || 0);
+  let badgeHtml = '';
+  if (it.onb) badgeHtml = '<span class="badge rood">onbekend</span>';
+  else if (verschil) badgeHtml = '<span class="badge rood">' + it.g + ' i.p.v. ' + (parseInt(it.v, 10) || 0) + '</span>';
+  else if (it.g != null) badgeHtml = '<span class="badge groen">✓ ' + it.g + '</span>';
+  if (it.bsd) badgeHtml += ' <span class="badge groen">🛒 besteld' + (it.best > 0 ? ' ' + it.best : '') + '</span>';
+  else if (it.best != null && it.best > 0) badgeHtml += ' <span class="badge geel">bestel ' + it.best + '</span>';
+  const el = document.createElement('div');
+  el.className = 'item' + (it.kl ? ' klaar' : '');
+  el.innerHTML = '<input type="checkbox" class="lijst-klaar" aria-label="Klaar"' + (it.kl ? ' checked' : '') + '>' +
+    '<div class="mid"><div class="t1">' + esc(it.o) + '</div>' +
+    '<div class="t2">' + esc(it.a || it.b) + ' · ' + esc(it.l || '–') +
+    (it.opm ? ' · 💬 ' + esc(it.opm) : '') + '</div></div>' +
+    '<div class="right">' + badgeHtml + '</div>' +
+    (it.kl ? '<button class="lijst-del" aria-label="Verwijderen">✕</button>' : '');
+  el.onclick = () => {
+    const art = (artIndex.get(it.b) || [])[0];
+    if (art) openPaneel(art); else openPaneelOnbekend(it.b);
+  };
+  // afvinken: item wordt als "klaar" gemarkeerd en zakt naar de klaar-sectie
+  const cb = el.querySelector('.lijst-klaar');
+  cb.onclick = (e) => e.stopPropagation();
+  cb.onchange = () => {
+    const item = levend(telling.items[it.b]);
+    if (!item) return;
+    if (cb.checked) item.kl = Date.now(); else delete item.kl;
+    item.ts = Date.now();
+    bewaarTelling();
+    planSync();
+    renderAlles();
+  };
+  const del = el.querySelector('.lijst-del');
+  if (del) del.onclick = (e) => {
+    e.stopPropagation();
+    // tombstone i.p.v. echt wissen, anders komt het item bij de volgende sync terug
+    telling.items[it.b] = { b: it.b, ts: Date.now(), del: true };
+    bewaarTelling();
+    planSync();
+    renderAlles();
+    toast('🗑 ' + (it.a || it.b) + ' uit de telling verwijderd');
+  };
+  return el;
+}
+
 function renderLijst() {
   const items = Object.values(telling.items).filter(it => !it.del).sort((a, b2) => (b2.ts || 0) - (a.ts || 0));
-  $('lijstSub').textContent = items.length ? items.length + ' artikelen geregistreerd' : 'Nog niets geteld';
+  const actief = items.filter(it => !it.kl);
+  const klaar = items.filter(it => it.kl);
+  $('lijstSub').textContent = items.length
+    ? items.length + ' artikelen geregistreerd' + (klaar.length ? ' · ' + klaar.length + ' klaar' : '')
+    : 'Nog niets gescand';
   const badge = $('navBadge');
   badge.hidden = !items.length;
   badge.textContent = items.length;
@@ -642,25 +691,23 @@ function renderLijst() {
     div.innerHTML = '<div class="leeg-melding">Scan een code om te beginnen.</div>';
     return;
   }
-  for (const it of items) {
-    const verschil = it.g != null && String(it.g) !== String(parseInt(it.v, 10) || 0);
-    let badgeHtml = '';
-    if (it.onb) badgeHtml = '<span class="badge rood">onbekend</span>';
-    else if (verschil) badgeHtml = '<span class="badge rood">' + it.g + ' i.p.v. ' + (parseInt(it.v, 10) || 0) + '</span>';
-    else if (it.g != null) badgeHtml = '<span class="badge groen">✓ ' + it.g + '</span>';
-    if (it.bsd) badgeHtml += ' <span class="badge groen">🛒 besteld' + (it.best > 0 ? ' ' + it.best : '') + '</span>';
-    else if (it.best != null && it.best > 0) badgeHtml += ' <span class="badge geel">bestel ' + it.best + '</span>';
-    const el = document.createElement('div');
-    el.className = 'item';
-    el.innerHTML = '<div class="mid"><div class="t1">' + esc(it.o) + '</div>' +
-      '<div class="t2">' + esc(it.a || it.b) + ' · ' + esc(it.l || '–') +
-      (it.opm ? ' · 💬 ' + esc(it.opm) : '') + '</div></div>' +
-      '<div class="right">' + badgeHtml + '</div>';
-    el.onclick = () => {
-      const art = (artIndex.get(it.b) || [])[0];
-      if (art) openPaneel(art); else openPaneelOnbekend(it.b);
+  for (const it of actief) div.appendChild(maakLijstItem(it));
+  if (klaar.length) {
+    const kop = document.createElement('div');
+    kop.className = 'klaar-kop';
+    kop.innerHTML = '<span>Klaar · ' + klaar.length + '</span>' +
+      '<button class="btn stil klein" id="btnWisKlaar">🗑 Verwijder afgevinkte</button>';
+    kop.querySelector('#btnWisKlaar').onclick = () => {
+      if (!confirm(klaar.length + ' afgevinkte artikel(en) uit de telling verwijderen?\n\nGeteld, bestellen en opmerkingen van deze artikelen worden gewist (op alle apparaten).')) return;
+      const nu = Date.now();
+      for (const it of klaar) telling.items[it.b] = { b: it.b, ts: nu, del: true };
+      bewaarTelling();
+      planSync();
+      renderAlles();
+      toast('🗑 ' + klaar.length + ' artikel(en) uit de telling verwijderd');
     };
-    div.appendChild(el);
+    div.appendChild(kop);
+    for (const it of klaar) div.appendChild(maakLijstItem(it));
   }
 }
 
