@@ -974,6 +974,7 @@ function bindEvents() {
   $('btnOpslaan').addEventListener('click', () => slaOp(false));
   $('btnKlopt').addEventListener('click', () => slaOp(true));
   $('btnAnnuleer').addEventListener('click', sluitPaneel);
+  $('btnTerugScan').addEventListener('click', () => { sluitPaneel(); startScanner(); });
   $('btnVerwijder').addEventListener('click', verwijderRegistratie);
   $('btnBesteld').addEventListener('click', wisselBesteld);
   $('btnVorig').addEventListener('click', () => blader(-1));
@@ -1009,11 +1010,19 @@ function bindEvents() {
     pasScanIndelingToe();
   });
 
+  window.addEventListener('resize', zetAppHoogte);
   window.addEventListener('online', () => { if (syncNodig) syncTelling(); });
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible' && syncNodig) syncTelling();
     if (document.visibilityState === 'hidden') stopScanner();
   });
+}
+
+// ---------- app-hoogte: exact de zichtbare vensterhoogte ----------
+// 100dvh rekent op Android met de ingeklapte adresbalk en maakt de pagina
+// dan scrollbaar; window.innerHeight volgt de echte viewport wel.
+function zetAppHoogte() {
+  document.documentElement.style.setProperty('--app-h', window.innerHeight + 'px');
 }
 
 // ---------- indeling scanscherm (per apparaat, niet gesynct) ----------
@@ -1055,6 +1064,7 @@ function registreerSw() {
 
 // ---------- start ----------
 function init() {
+  zetAppHoogte();
   laadLokaal();
   bindEvents();
   $('versieInfo').textContent = 'Magazijn Scanner v' + VERSIE + ' · data: ' + DATA_REPO;

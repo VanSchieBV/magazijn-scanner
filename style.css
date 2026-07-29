@@ -34,7 +34,9 @@ html, body {
 body {
   display: flex;
   flex-direction: column;
-  min-height: 100dvh;
+  /* --app-h wordt door JS op de echte vensterhoogte gezet; 100dvh kan op
+     Android groter zijn dan de zichtbare viewport (adresbalk) en gaf scroll */
+  min-height: var(--app-h, 100dvh);
 }
 
 button { font-family: inherit; }
