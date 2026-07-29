@@ -521,10 +521,10 @@ input.ov-ink { width: 6.5em; margin-left: 6px; font-size: 0.95rem; }
 /* vaste kolombreedtes: elke crediteurtabel identiek, Besteld altijd uiterst rechts.
    Artikel en Hun nummer delen de resterende ruimte 50/50 (geen width = gelijke
    verdeling bij table-layout:fixed) — posities schuiven dus nooit mee met de inhoud. */
-table.bestel-tabel { table-layout: fixed; width: 100%; min-width: 34rem; }
+table.bestel-tabel { table-layout: fixed; width: 100%; min-width: 37rem; }
 table.bestel-tabel th { white-space: nowrap; }
-table.bestel-tabel th:nth-child(3) { width: 4.2rem; }  /* Locatie */
-table.bestel-tabel th:nth-child(4) { width: 3.4rem; }  /* Aantal */
+table.bestel-tabel th:nth-child(3) { width: 6rem; }    /* Locatie */
+table.bestel-tabel th:nth-child(4) { width: 4.5rem; }  /* Aantal */
 table.bestel-tabel th:nth-child(5) { width: 10rem; }   /* Besteld */
 table.bestel-tabel td { overflow-wrap: break-word; }
 table.bestel-tabel th:nth-child(5) { text-align: right; }
