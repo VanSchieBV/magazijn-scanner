@@ -388,9 +388,11 @@ function openPaneel(art, behoudBlader) {
     veld('Crediteur', esc(art.c || '–')) +
     veld('Fabrikantcode', esc(art.f || '–') +
       (art.f ? ' <button class="copy-mini" data-copy="' + esc(art.f) + '">⧉ kopieer</button>' : '')) +
-    veld('Hun nummer', esc(art.h || '–')) +
+    veld('Hun nummer', art.h
+      ? '<span class="kopieer-waarde" data-copy="' + esc(art.h) + '">' + esc(art.h) + '</span>'
+      : '–') +
     veld('Barcode', esc(art.b));
-  bindKopieKnoppen($('artGrid'), 'Fabrikantcode gekopieerd');
+  bindKopieKnoppen($('artGrid'));
   $('inpGeteld').value = bestaand && bestaand.g != null ? bestaand.g : '';
   $('inpBestellen').value = bestaand && bestaand.best != null ? bestaand.best : '';
   $('inpOpmerking').value = bestaand ? (bestaand.opm || '') : '';
@@ -431,11 +433,12 @@ function openPaneelOnbekend(code, behoudBlader) {
   window.scrollTo(0, 0);
 }
 
-function bindKopieKnoppen(container, melding) {
+function bindKopieKnoppen(container) {
   container.querySelectorAll('[data-copy]').forEach(btn => {
     btn.onclick = () => {
-      navigator.clipboard.writeText(btn.getAttribute('data-copy'))
-        .then(() => toast(melding))
+      const w = btn.getAttribute('data-copy');
+      navigator.clipboard.writeText(w)
+        .then(() => toast('Gekopieerd: ' + w))
         .catch(() => toast('Kopiëren mislukt', true));
     };
   });
