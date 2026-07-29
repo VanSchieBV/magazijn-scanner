@@ -726,8 +726,9 @@ function renderOverzicht() {
           : '<span class="badge groen">🛒 alles besteld</span>') + '</div>';
       h += '<div class="tabel-wrap"><table><tr><th>Artikel</th><th>Hun nummer</th><th>Locatie</th><th class="num">Aantal</th></tr>';
       for (const it of regels) {
+        const hun = it.h || it.f || '';
         h += '<tr data-key="' + esc(it.b) + '"' + (it.bsd ? ' class="rij-besteld"' : '') + '><td><b>' + esc(it.a || it.b) + '</b><br><span style="color:var(--muted)">' + esc(it.o) + '</span></td>' +
-          '<td>' + esc(it.h || it.f || '–') + '</td><td>' + esc(it.l || '–') + '</td>' +
+          (hun ? '<td class="hun-kopie" data-hun="' + esc(hun) + '">' + esc(hun) + '</td>' : '<td>–</td>') + '<td>' + esc(it.l || '–') + '</td>' +
           '<td class="num" style="font-weight:650">' +
           (it.bsd ? '<span style="color:var(--green)">🛒 ' + it.best + '</span>' : '<span style="color:var(--yellow)">' + it.best + '</span>') +
           '</td></tr>';
@@ -740,6 +741,15 @@ function renderOverzicht() {
       btn.onclick = () => {
         navigator.clipboard.writeText(btn.getAttribute('data-kopie'))
           .then(() => toast('Bestellijst gekopieerd'))
+          .catch(() => toast('Kopiëren mislukt', true));
+      };
+    });
+    // tik op Hun nummer kopieert alleen dat nummer, zonder de rij te openen
+    $('ovBestellen').querySelectorAll('td[data-hun]').forEach(td => {
+      td.onclick = (e) => {
+        e.stopPropagation();
+        navigator.clipboard.writeText(td.getAttribute('data-hun'))
+          .then(() => toast('Gekopieerd: ' + td.getAttribute('data-hun')))
           .catch(() => toast('Kopiëren mislukt', true));
       };
     });

@@ -499,6 +499,9 @@ tr:last-child td { border-bottom: none; }
 tr[data-key] { cursor: pointer; }
 tr[data-key]:active td { background: var(--surface-2); }
 td.num, th.num { text-align: right; }
+/* Hun nummer in de besteltabel: tik = kopieer (rij opent dan niet) */
+td.hun-kopie { color: var(--green); text-decoration: underline dotted; text-underline-offset: 3px; }
+td.hun-kopie::after { content: ' ⧉'; color: var(--muted); font-size: 0.85em; }
 .tabel-wrap { overflow-x: auto; }
 .cred-kop {
   display: flex;
