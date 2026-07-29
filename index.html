@@ -23,6 +23,8 @@
     <div id="setupBanner" class="setup-banner" hidden>⚠ Nog geen koppeling ingesteld — tik hier om je GitHub-token in te voeren.</div>
 
     <div id="scanIdle">
+      <div id="scanBoven"></div>
+      <div id="scanCluster">
       <div class="search-results" id="zoekResultaten"></div>
 
       <div class="scan-hint">Richt op de code van het vak en druk op de scanknop</div>
@@ -41,6 +43,8 @@
           Scannen
         </button>
       </div>
+      </div>
+      <div id="scanOnder"></div>
     </div>
 
     <!-- artikelpaneel na scan -->
@@ -56,13 +60,13 @@
 
         <div class="telrij">
           <button class="step-btn" id="stMin" aria-label="Eén minder">−</button>
-          <div class="telveld sel" id="veldGeteld">
-            <div class="lbl">Geteld</div>
-            <input type="number" id="inpGeteld" inputmode="numeric" placeholder="–">
-          </div>
-          <div class="telveld" id="veldBestellen">
+          <div class="telveld sel" id="veldBestellen">
             <div class="lbl">Bestellen</div>
             <input type="number" id="inpBestellen" inputmode="numeric" placeholder="–">
+          </div>
+          <div class="telveld" id="veldGeteld">
+            <div class="lbl">Geteld</div>
+            <input type="number" id="inpGeteld" inputmode="numeric" placeholder="–">
           </div>
           <button class="step-btn" id="stPlus" aria-label="Eén meer">+</button>
         </div>
@@ -152,6 +156,18 @@
           <div style="font-size:.78rem;color:var(--muted);">Na opslaan meteen de camera weer openen</div>
         </div>
         <label class="switch"><input type="checkbox" id="swDoorscannen"><span class="track"></span></label>
+      </div>
+      <div class="switch-row">
+        <div>
+          <div style="font-size:.9rem;">Scanknop boven de zoekbalk</div>
+          <div style="font-size:.78rem;color:var(--muted);">Wissel de volgorde op het scanscherm</div>
+        </div>
+        <label class="switch"><input type="checkbox" id="swKnopBoven"><span class="track"></span></label>
+      </div>
+      <div class="set-row" style="margin-top:14px;">
+        <div class="lbl">Hoogte van zoekbalk &amp; scanknop</div>
+        <input type="range" id="slScanPos" min="0" max="100" step="5">
+        <div class="sub">Naar links = hoger op het scherm, naar rechts = lager.</div>
       </div>
     </div>
 

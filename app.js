@@ -4,7 +4,7 @@
  */
 'use strict';
 
-const VERSIE = '1.4.0';
+const VERSIE = '1.7.0';
 const DATA_REPO = 'VanSchieBV/magazijn-data';
 const API_BASE = 'https://api.github.com/repos/' + DATA_REPO + '/contents/';
 
@@ -394,7 +394,7 @@ function openPaneel(art, behoudBlader) {
   $('inpGeteld').value = bestaand && bestaand.g != null ? bestaand.g : '';
   $('inpBestellen').value = bestaand && bestaand.best != null ? bestaand.best : '';
   $('inpOpmerking').value = bestaand ? (bestaand.opm || '') : '';
-  zetActiefVeld('inpGeteld');
+  zetActiefVeld('inpBestellen');
   $('btnVerwijder').hidden = !bestaand;
   $('btnKlopt').hidden = false;
   $('scanIdle').hidden = true;
@@ -419,7 +419,7 @@ function openPaneelOnbekend(code, behoudBlader) {
   $('inpGeteld').value = bestaand && bestaand.g != null ? bestaand.g : '';
   $('inpBestellen').value = bestaand && bestaand.best != null ? bestaand.best : '';
   $('inpOpmerking').value = bestaand ? (bestaand.opm || '') : '';
-  zetActiefVeld('inpGeteld');
+  zetActiefVeld('inpBestellen');
   $('btnVerwijder').hidden = !bestaand;
   $('btnKlopt').hidden = true;
   $('scanIdle').hidden = true;
@@ -994,11 +994,29 @@ function bindEvents() {
   $('swDoorscannen').addEventListener('change', () =>
     localStorage.setItem('mgz_doorscannen', $('swDoorscannen').checked ? '1' : '0'));
 
+  $('slScanPos').addEventListener('input', () => {
+    localStorage.setItem('mgz_scanpos', $('slScanPos').value);
+    pasScanIndelingToe();
+  });
+  $('swKnopBoven').addEventListener('change', () => {
+    localStorage.setItem('mgz_knopboven', $('swKnopBoven').checked ? '1' : '0');
+    pasScanIndelingToe();
+  });
+
   window.addEventListener('online', () => { if (syncNodig) syncTelling(); });
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible' && syncNodig) syncTelling();
     if (document.visibilityState === 'hidden') stopScanner();
   });
+}
+
+// ---------- indeling scanscherm (per apparaat, niet gesynct) ----------
+function pasScanIndelingToe() {
+  const p = parseInt(localStorage.getItem('mgz_scanpos') || '100', 10);
+  const idle = $('scanIdle');
+  idle.style.setProperty('--ruimte-boven', p);
+  idle.style.setProperty('--ruimte-onder', 100 - p);
+  idle.classList.toggle('knop-boven', localStorage.getItem('mgz_knopboven') === '1');
 }
 
 // ---------- service worker & app-updates ----------
@@ -1036,6 +1054,9 @@ function init() {
   $('versieInfo').textContent = 'Magazijn Scanner v' + VERSIE + ' · data: ' + DATA_REPO;
   $('inpToken').value = getToken();
   $('swDoorscannen').checked = localStorage.getItem('mgz_doorscannen') !== '0';
+  $('slScanPos').value = localStorage.getItem('mgz_scanpos') || '100';
+  $('swKnopBoven').checked = localStorage.getItem('mgz_knopboven') === '1';
+  pasScanIndelingToe();
   toonSetupBanner();
   updateArtInfo();
   renderLijst();

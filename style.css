@@ -97,6 +97,19 @@ main {
   min-height: 0;
 }
 #scanIdle[hidden] { display: none; }
+/* verticale positie van zoekbalk + scanknop: instelbaar via de spacers
+   (--ruimte-boven/-onder, gezet vanuit Instellingen); 100/0 = onderaan */
+#scanBoven { flex: var(--ruimte-boven, 100) 1 0; min-height: 0; }
+#scanOnder { flex: var(--ruimte-onder, 0) 1 0; min-height: 0; }
+#scanCluster { display: flex; flex-direction: column; min-height: 0; }
+#scanCluster .scan-hint { order: 1; }
+#scanCluster .search-results { order: 2; }
+#scanCluster .search-row { order: 3; }
+#scanCluster .scan-hero { order: 4; }
+/* omgekeerde volgorde: scanknop boven, zoekbalk (met resultaten erboven) onder */
+#scanIdle.knop-boven #scanCluster .scan-hero { order: 2; padding: 4px 0 16px; }
+#scanIdle.knop-boven #scanCluster .search-results { order: 3; }
+#scanIdle.knop-boven #scanCluster .search-row { order: 4; }
 @keyframes fadein { from { opacity: 0.4; } to { opacity: 1; } }
 
 /* ---------- Kaarten ---------- */
@@ -123,7 +136,7 @@ main {
   padding: 14px 0 10px;
 }
 .scan-btn {
-  width: 168px; height: 168px;
+  width: clamp(120px, 22dvh, 168px); height: clamp(120px, 22dvh, 168px);
   border-radius: 50%;
   border: 2px solid var(--green);
   background: radial-gradient(circle at 50% 40%, var(--green-dim), transparent 75%), var(--surface);
@@ -165,16 +178,17 @@ main {
   font-size: 1rem;
   cursor: pointer;
 }
-/* resultaten vullen de ruimte boven de zoekbalk; nieuwste onderaan, dicht bij de balk */
+/* resultaten direct boven de zoekbalk; bij veel resultaten intern scrollen */
 .search-results {
-  flex: 1;
+  flex: 0 1 auto;
+  max-height: 34dvh;
   min-height: 0;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
   margin-bottom: 10px;
 }
-.search-results > :first-child { margin-top: auto; }
+.search-results:empty { margin-bottom: 0; }
 
 /* ---------- Camera ---------- */
 #camOverlay {
@@ -579,6 +593,7 @@ td.besteld-cel input[type="checkbox"] {
 .set-row .sub { font-size: 0.78rem; color: var(--muted); margin-top: 6px; }
 /* gemaskeerd tekstveld: oogt als wachtwoordveld, maar Chrome's wachtwoordmanager blijft eraf */
 input.masked { -webkit-text-security: disc; }
+#slScanPos { width: 100%; accent-color: var(--green-strong); margin: 6px 0; }
 .set-row input[type="password"], .set-row input[type="text"] {
   width: 100%;
   background: var(--bg);
