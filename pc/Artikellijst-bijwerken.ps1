@@ -75,13 +75,12 @@ function Lees-XlsxSheet {
     return , $rijen
 }
 
-$kolommen = $null   # hashtable: kolomnaam -> kolomletter
-$dataRijen = $null  # lijst hashtables kolomletter -> waarde
-
-if ($Bestand -match '\.xlsx$') {
-    Write-Host 'Xlsx-bestand uitlezen...'
+function Lees-XlsxTabel {
+    # opent een xlsx en geeft @{ Kolommen = naam->letter; Rijen = lijst } terug.
+    # VoorkeurTab wint; anders het eerste tabblad met KenmerkKolom in de kop.
+    param([string]$Pad, [string]$VoorkeurTab, [string]$KenmerkKolom)
     Add-Type -AssemblyName System.IO.Compression.FileSystem
-    $zip = [IO.Compression.ZipFile]::OpenRead($Bestand)
+    $zip = [IO.Compression.ZipFile]::OpenRead($Pad)
     try {
         # gedeelde teksten
         $ss = New-Object System.Collections.Generic.List[string]
@@ -109,25 +108,34 @@ if ($Bestand -match '\.xlsx$') {
             $sheetMap[$s.name] = $relMap[$rid]
         }
 
-        # 'Artikellijst' pakken; anders het eerste tabblad met kolom 'Barcode'
         $doel = $null
-        if ($sheetMap.Contains('Artikellijst')) { $doel = $sheetMap['Artikellijst'] }
+        if ($VoorkeurTab -and $sheetMap.Contains($VoorkeurTab)) { $doel = $sheetMap[$VoorkeurTab] }
         else {
             foreach ($naam in $sheetMap.Keys) {
                 $kop = Lees-XlsxSheet -Zip $zip -Target $sheetMap[$naam] -SharedStrings $ss -MaxRijen 1
-                if ($kop.Count -and $kop[0].Values -contains 'Barcode') { $doel = $sheetMap[$naam]; Write-Host "Tabblad '$naam' gebruikt."; break }
+                if ($kop.Count -and $kop[0].Values -contains $KenmerkKolom) { $doel = $sheetMap[$naam]; Write-Host "Tabblad '$naam' gebruikt."; break }
             }
         }
-        if (-not $doel) { throw 'Geen tabblad "Artikellijst" (of tabblad met kolom Barcode) gevonden.' }
+        if (-not $doel) { throw "Geen tabblad '$VoorkeurTab' (of tabblad met kolom $KenmerkKolom) gevonden in $Pad." }
 
         $alle = Lees-XlsxSheet -Zip $zip -Target $doel -SharedStrings $ss
     } finally {
         $zip.Dispose()
     }
-    if ($alle.Count -lt 2) { throw 'Het tabblad is leeg.' }
-    $kolommen = @{}
-    foreach ($kv in $alle[0].GetEnumerator()) { $kolommen[('' + $kv.Value).Trim()] = $kv.Key }
-    $dataRijen = $alle.GetRange(1, $alle.Count - 1)
+    if ($alle.Count -lt 2) { throw "Het tabblad in $Pad is leeg." }
+    $kol = @{}
+    foreach ($kv in $alle[0].GetEnumerator()) { $kol[('' + $kv.Value).Trim()] = $kv.Key }
+    return @{ Kolommen = $kol; Rijen = $alle.GetRange(1, $alle.Count - 1) }
+}
+
+$kolommen = $null   # hashtable: kolomnaam -> kolomletter
+$dataRijen = $null  # lijst hashtables kolomletter -> waarde
+
+if ($Bestand -match '\.xlsx$') {
+    Write-Host 'Xlsx-bestand uitlezen...'
+    $tabel = Lees-XlsxTabel -Pad $Bestand -VoorkeurTab 'Artikellijst' -KenmerkKolom 'Barcode'
+    $kolommen = $tabel.Kolommen
+    $dataRijen = $tabel.Rijen
 } else {
     Write-Host 'CSV-bestand uitlezen...'
     $eersteRegel = Get-Content $Bestand -TotalCount 1 -Encoding UTF8
@@ -142,6 +150,25 @@ if ($Bestand -match '\.xlsx$') {
         foreach ($p in $r.PSObject.Properties) { $h[$p.Name] = $p.Value }
         $dataRijen.Add($h)
     }
+}
+
+# --- 2b. crediteurnamen inlezen (Bron\Crediteuren.xlsx, kolommen Cred.nr + Naam) ---
+$credNamen = @{}
+$credBestand = Join-Path $BronMap 'Crediteuren.xlsx'
+if (Test-Path $credBestand) {
+    Write-Host 'Crediteurnamen uitlezen...'
+    $credTabel = Lees-XlsxTabel -Pad $credBestand -VoorkeurTab 'Crediteur' -KenmerkKolom 'Cred.nr'
+    $kNr = $credTabel.Kolommen['Cred.nr']
+    $kNaam = $credTabel.Kolommen['Naam']
+    if (-not $kNr -or -not $kNaam) { throw 'Crediteuren.xlsx mist de kolom "Cred.nr" of "Naam".' }
+    foreach ($r in $credTabel.Rijen) {
+        $nr = ('' + $r[$kNr]).Trim()
+        $naam = ('' + $r[$kNaam]).Trim()
+        if ($nr -and $naam) { $credNamen[$nr] = $naam }
+    }
+    Write-Host ("{0} crediteurnamen gevonden." -f $credNamen.Count)
+} else {
+    Write-Host "Crediteuren.xlsx niet gevonden in $BronMap - codes blijven ongewijzigd." -ForegroundColor Yellow
 }
 
 # --- 3. omzetten naar JSON ---
@@ -176,14 +203,22 @@ $veldKol = @{
     c = $kolommen['Crediteur']; f = $kolommen['Fabrikantcode']; h = $kolommen['Hun nummer']
     l = $kolommen['Locatie']; v = $kolommen[$voorraadKop]
 }
+$credOnbekend = @{}
 foreach ($rij in $dataRijen) {
     $bc = ('' + $rij[$veldKol.b]).Trim()
     if (-not $bc) { continue }
+    # crediteurcode omzetten naar de volledige naam; onbekende code blijft staan
+    $credCode = ('' + $rij[$veldKol.c]).Trim()
+    $cred = $credCode
+    if ($credCode) {
+        if ($credNamen.ContainsKey($credCode)) { $cred = $credNamen[$credCode] }
+        elseif ($credNamen.Count) { $credOnbekend[$credCode] = $true }
+    }
     if ($aantal) { $null = $sb.Append(',') }
     $null = $sb.Append('{"b":"').Append((JsonEsc $bc))
     $null = $sb.Append('","a":"').Append((JsonEsc ('' + $rij[$veldKol.a]).Trim()))
     $null = $sb.Append('","o":"').Append((JsonEsc ('' + $rij[$veldKol.o]).Trim()))
-    $null = $sb.Append('","c":"').Append((JsonEsc ('' + $rij[$veldKol.c]).Trim()))
+    $null = $sb.Append('","c":"').Append((JsonEsc $cred))
     $null = $sb.Append('","f":"').Append((JsonEsc ('' + $rij[$veldKol.f]).Trim()))
     $null = $sb.Append('","h":"').Append((JsonEsc ('' + $rij[$veldKol.h]).Trim()))
     $null = $sb.Append('","l":"').Append((JsonEsc ('' + $rij[$veldKol.l]).Trim()))
@@ -195,6 +230,10 @@ $null = $sb.Append(']}')
 $json = $sb.ToString()
 if ($aantal -lt 10) { throw "Slechts $aantal artikelen gevonden - dat lijkt niet goed. Gestopt." }
 Write-Host ("{0} artikelen, {1:N0} kB JSON" -f $aantal, ($json.Length / 1024))
+if ($credOnbekend.Count) {
+    Write-Host ("Let op: {0} crediteurcode(s) staan niet in Crediteuren.xlsx en blijven als code staan: {1}" -f `
+        $credOnbekend.Count, (($credOnbekend.Keys | Sort-Object) -join ', ')) -ForegroundColor Yellow
+}
 
 # --- 4. GitHub-token via credential manager (GitHub Desktop) ---
 Write-Host 'Aanmelden bij GitHub...'

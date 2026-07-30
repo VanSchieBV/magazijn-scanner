@@ -45,6 +45,10 @@ Het token wordt alleen lokaal op het apparaat bewaard.
   bureaublad. Die leest `Export Artikelen.xlsx` (of `.csv`) uit
   `C:\Users\td\Projecten_AI\Magazijn scanner\Bron` en zet de nieuwe artikellijst in de cloud.
   De app haalt de lijst automatisch op bij de volgende start.
+- In diezelfde map hoort **`Crediteuren.xlsx`** (kolommen `Cred.nr` en `Naam`). Het script zet
+  daarmee de crediteurcode uit de export om naar de volledige naam, zodat het overzicht
+  "Trailer Service Veenendaal B.V." toont in plaats van `TSVVEE10334`. Staat een code niet in
+  dat bestand, dan blijft de code staan en meldt het script welke dat zijn.
 
 ## Dagelijks gebruik
 

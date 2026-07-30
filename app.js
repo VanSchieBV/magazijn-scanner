@@ -715,6 +715,13 @@ function renderLijst() {
 }
 
 // ---------- overzicht ----------
+// crediteur van een regel: de waarde uit de actuele artikellijst wint, zodat
+// eerder gescande regels de volledige naam tonen zodra die lijst is ververst
+function credVan(it) {
+  const art = (artIndex.get(it.b) || [])[0];
+  return (art && art.c) || it.c || '';
+}
+
 // filter via de vier tegels bovenaan; null = de gebruikelijke drie secties
 let ovFilter = null;
 
@@ -808,7 +815,7 @@ function renderOverzicht() {
   } else {
     const groepen = {};
     for (const it of bestellen) {
-      const c = it.c || 'Onbekende crediteur';
+      const c = credVan(it) || 'Onbekende crediteur';
       (groepen[c] = groepen[c] || []).push(it);
     }
     let h = '';
@@ -905,7 +912,7 @@ function downloadCsv() {
   const regels = [kol.join(';')];
   for (const it of items) {
     regels.push([it.b, it.a, it.o, it.f, it.h, it.l, it.v,
-      it.g != null ? it.g : '', it.c, it.best != null ? it.best : '',
+      it.g != null ? it.g : '', credVan(it), it.best != null ? it.best : '',
       it.bsd ? 'ja' : '', it.ink || '', it.opm].map(cel).join(';'));
   }
   const blob = new Blob(['﻿' + regels.join('\r\n')], { type: 'text/csv;charset=utf-8' });
