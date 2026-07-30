@@ -595,14 +595,28 @@ td.besteld-cel input[type="checkbox"] {
   vertical-align: middle;
 }
 .tabel-wrap { overflow-x: auto; }
+/* elke crediteur is een eigen blok: kop, kolomnamen, regels, afsluiting */
+.cred-blok {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-s);
+  overflow: hidden;
+  margin-bottom: 14px;
+}
+.cred-blok:last-child { margin-bottom: 0; }
 .cred-kop {
   display: flex;
   align-items: center;
   justify-content: flex-start;
   gap: 10px;
-  margin: 4px 0 6px;
+  padding: 10px 12px;
+  background: var(--surface-2);
+  border-bottom: 2px solid var(--border);
 }
 .cred-kop .naam { font-weight: 650; color: var(--yellow); font-size: 0.92rem; }
+/* kolomnamen: dunne scheiding; regels onderling ook dun, laatste regel geen lijn */
+.bestel-tabel th { border-bottom: 1px solid var(--border); }
+.bestel-tabel td { border-bottom: 1px solid rgba(46, 56, 51, 0.55); }
+.bestel-tabel tr:last-child td { border-bottom: none; }
 
 /* ---------- Instellingen ---------- */
 .set-row { margin-bottom: 16px; }
