@@ -527,11 +527,28 @@ textarea:focus { border-color: var(--green); }
   gap: 10px;
   margin-bottom: 14px;
 }
+/* tegels zijn filterknoppen */
 .stat {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 14px;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s;
+}
+.stat:active { background: var(--surface-2); }
+.stat.sel { border-color: var(--green); background: var(--green-dim); }
+.filter-melding {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: -4px 0 14px;
+  color: var(--muted);
+  font-size: 0.83rem;
 }
 .stat .n { font-size: 1.6rem; font-weight: 700; }
 .stat .l { font-size: 0.78rem; color: var(--muted); margin-top: 3px; }

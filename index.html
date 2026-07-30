@@ -117,15 +117,23 @@
   <!-- ============ OVERZICHT ============ -->
   <section class="view" id="view-overzicht">
     <div class="stats" id="ovStats"></div>
-    <div class="card">
+    <div class="filter-melding" id="ovFilterMelding" hidden>
+      <span id="ovFilterTekst"></span>
+      <button class="btn stil klein" id="btnAllesTonen">Alles tonen</button>
+    </div>
+    <div class="card" id="kaartGeteld" hidden>
+      <h2 class="groen">Geteld</h2>
+      <div class="tabel-wrap" id="ovGeteld"></div>
+    </div>
+    <div class="card" id="kaartVerschillen">
       <h2>Telverschillen</h2>
       <div class="tabel-wrap" id="ovVerschillen"></div>
     </div>
-    <div class="card">
+    <div class="card" id="kaartBestellen">
       <h2 class="geel">Bestellen</h2>
       <div id="ovBestellen"></div>
     </div>
-    <div class="card">
+    <div class="card" id="kaartOpmerkingen">
       <h2>Opmerkingen</h2>
       <div class="tabel-wrap" id="ovOpmerkingen"></div>
     </div>

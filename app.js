@@ -715,6 +715,29 @@ function renderLijst() {
 }
 
 // ---------- overzicht ----------
+// filter via de vier tegels bovenaan; null = de gebruikelijke drie secties
+let ovFilter = null;
+
+function zetOvFilter(sectie) {
+  ovFilter = (ovFilter === sectie) ? null : sectie;
+  renderOverzicht();
+  window.scrollTo(0, 0);
+}
+
+function pasOvFilterToe() {
+  const labels = {
+    geteld: 'Alleen geteld', verschillen: 'Alleen telverschillen',
+    bestellen: 'Alleen te bestellen', opmerkingen: 'Alleen opmerkingen'
+  };
+  // zonder filter blijft Geteld verborgen: die lijst is lang en staat al in Gescand
+  $('kaartGeteld').hidden = ovFilter !== 'geteld';
+  $('kaartVerschillen').hidden = !(ovFilter === null || ovFilter === 'verschillen');
+  $('kaartBestellen').hidden = !(ovFilter === null || ovFilter === 'bestellen');
+  $('kaartOpmerkingen').hidden = !(ovFilter === null || ovFilter === 'opmerkingen');
+  $('ovFilterMelding').hidden = !ovFilter;
+  if (ovFilter) $('ovFilterTekst').textContent = labels[ovFilter];
+}
+
 // rijen klikbaar maken: opent het artikelpaneel en laat < / > door de
 // artikelen bladeren in de volgorde van deze overzichtssectie
 function koppelOverzichtRijen(container) {
@@ -732,11 +755,36 @@ function renderOverzicht() {
   const opmerkingen = items.filter(it => it.opm);
   const geteld = items.filter(it => it.g != null);
 
+  // de vier tegels zijn filters: tik = alleen die sectie, nog eens tikken = alles
+  const tegel = (sectie, kleur, n, label) =>
+    '<button type="button" class="stat' + (kleur ? ' ' + kleur : '') +
+    (ovFilter === sectie ? ' sel' : '') + '" data-sectie="' + sectie + '">' +
+    '<div class="n">' + n + '</div><div class="l">' + label + '</div></button>';
   $('ovStats').innerHTML =
-    '<div class="stat groen"><div class="n">' + geteld.length + '</div><div class="l">Geteld</div></div>' +
-    '<div class="stat rood"><div class="n">' + verschillen.length + '</div><div class="l">Telverschillen</div></div>' +
-    '<div class="stat geel"><div class="n">' + bestellen.length + '</div><div class="l">Te bestellen</div></div>' +
-    '<div class="stat"><div class="n">' + opmerkingen.length + '</div><div class="l">Opmerkingen</div></div>';
+    tegel('geteld', 'groen', geteld.length, 'Geteld') +
+    tegel('verschillen', 'rood', verschillen.length, 'Telverschillen') +
+    tegel('bestellen', 'geel', bestellen.length, 'Te bestellen') +
+    tegel('opmerkingen', '', opmerkingen.length, 'Opmerkingen');
+  $('ovStats').querySelectorAll('[data-sectie]').forEach(b => {
+    b.onclick = () => zetOvFilter(b.getAttribute('data-sectie'));
+  });
+  pasOvFilterToe();
+
+  // geteld — alleen zichtbaar als er op de tegel Geteld is getikt
+  if (!geteld.length) {
+    $('ovGeteld').innerHTML = '<div class="leeg-melding">Nog niets geteld</div>';
+  } else {
+    let h = '<table><tr><th>Artikel</th><th>Locatie</th><th class="num">Systeem</th><th class="num">Geteld</th></tr>';
+    for (const it of geteld.sort((a, b) => (a.l || '').localeCompare(b.l || ''))) {
+      const sys = parseInt(it.v, 10) || 0;
+      const afwijkend = !it.onb && it.g !== sys;
+      h += '<tr data-key="' + esc(it.b) + '"><td><b>' + esc(it.a || it.b) + '</b><br><span style="color:var(--muted)">' + esc(it.o) + '</span></td>' +
+        '<td>' + esc(it.l || '–') + '</td><td class="num">' + (it.onb ? '–' : sys) + '</td>' +
+        '<td class="num" style="font-weight:600' + (afwijkend ? ';color:var(--red)' : ';color:var(--green)') + '">' + it.g + '</td></tr>';
+    }
+    $('ovGeteld').innerHTML = h + '</table>';
+    koppelOverzichtRijen($('ovGeteld'));
+  }
 
   // telverschillen
   if (!verschillen.length) {
@@ -982,6 +1030,7 @@ function bindEvents() {
 
   $('btnSyncNu').addEventListener('click', () => { syncTelling(); });
   $('btnCsv').addEventListener('click', downloadCsv);
+  $('btnAllesTonen').addEventListener('click', () => { ovFilter = null; renderOverzicht(); });
   $('btnAfronden').addEventListener('click', rondAf);
   $('btnArtVerversen').addEventListener('click', () => verversArtikelen(false));
 
