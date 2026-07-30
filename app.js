@@ -768,7 +768,7 @@ function renderOverzicht() {
       const regels = groepen[cred];
       const nogTeDoen = regels.filter(it => !it.bsd);
       h += '<div class="cred-kop"><span class="naam">' + esc(cred) + '</span>' +
-        (nogTeDoen.length ? '' : '<span class="badge groen">🛒 alles besteld</span>') + '</div>';
+        (nogTeDoen.length ? '' : '<span class="badge groen">✓ Alles besteld</span>') + '</div>';
       h += '<div class="tabel-wrap"><table class="bestel-tabel"><tr><th>Artikel</th><th>Hun nummer</th><th>Locatie</th><th class="num">Aantal</th><th>Besteld</th></tr>';
       for (const it of regels) {
         const hun = it.h || it.f || '';

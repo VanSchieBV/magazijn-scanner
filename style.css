@@ -598,7 +598,8 @@ td.besteld-cel input[type="checkbox"] {
 .cred-kop {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
+  gap: 10px;
   margin: 4px 0 6px;
 }
 .cred-kop .naam { font-weight: 650; color: var(--yellow); font-size: 0.92rem; }
