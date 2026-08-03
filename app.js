@@ -228,8 +228,8 @@ function scanNu() {
 }
 
 // bij meerdere codes in beeld: pak de code die het dichtst bij het midden ligt
-function dichtstBijMidden(codes, video) {
-  const cx = video.videoWidth / 2, cy = video.videoHeight / 2;
+function dichtstBijMidden(codes, beeld) {
+  const cx = beeld.width / 2, cy = beeld.height / 2;
   let beste = codes[0], besteAfstand = Infinity;
   for (const c of codes) {
     const b = c.boundingBox;
@@ -240,6 +240,37 @@ function dichtstBijMidden(codes, video) {
     if (afstand < besteAfstand) { besteAfstand = afstand; beste = c; }
   }
   return beste;
+}
+
+// welk deel van het camerabeeld (in videopixels) valt binnen het scanvlak op het scherm?
+// de video staat op object-fit: cover, dus het beeld is geschaald en aan de randen afgesneden
+function scanVakInVideo(video) {
+  const vr = video.getBoundingClientRect();
+  const fr = document.querySelector('.cam-frame').getBoundingClientRect();
+  const vw = video.videoWidth, vh = video.videoHeight;
+  if (!vw || !vh || !vr.width || !vr.height) return null;
+  const schaal = Math.max(vr.width / vw, vr.height / vh);
+  const offX = (vw * schaal - vr.width) / 2;
+  const offY = (vh * schaal - vr.height) / 2;
+  const x1 = Math.max(0, (fr.left - vr.left + offX) / schaal);
+  const y1 = Math.max(0, (fr.top - vr.top + offY) / schaal);
+  const x2 = Math.min(vw, (fr.right - vr.left + offX) / schaal);
+  const y2 = Math.min(vh, (fr.bottom - vr.top + offY) / schaal);
+  if (x2 - x1 < 10 || y2 - y1 < 10) return null;
+  return { x: x1, y: y1, w: x2 - x1, h: y2 - y1 };
+}
+
+// knip het scanvlak uit het huidige camerabeeld; de decoder ziet alleen dit stukje
+let scanCanvas = null;
+function pakScanBeeld(video) {
+  const vak = scanVakInVideo(video);
+  if (!vak) return null;
+  if (!scanCanvas) scanCanvas = document.createElement('canvas');
+  scanCanvas.width = Math.round(vak.w);
+  scanCanvas.height = Math.round(vak.h);
+  const ctx = scanCanvas.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(video, vak.x, vak.y, vak.w, vak.h, 0, 0, scanCanvas.width, scanCanvas.height);
+  return scanCanvas;
 }
 
 function piep() {
@@ -288,8 +319,10 @@ async function startScanner() {
       detectorLus = setInterval(async () => {
         if (!scanActief() || video.readyState < 2) return;
         try {
-          const codes = await detector.detect(video);
-          if (codes.length && scanActief()) verwerkScan(dichtstBijMidden(codes, video).rawValue);
+          const beeld = pakScanBeeld(video);
+          if (!beeld) return;
+          const codes = await detector.detect(beeld);
+          if (codes.length && scanActief()) verwerkScan(dichtstBijMidden(codes, beeld).rawValue);
         } catch (e) { /* frame overslaan */ }
       }, 140);
     } else {
@@ -303,9 +336,17 @@ async function startScanner() {
       ]);
       hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
       zxingReader = new ZXing.BrowserMultiFormatReader(hints);
-      zxingReader.decodeFromStream(camStream, video, (res) => {
-        if (res && scanActief()) verwerkScan(res.getText());
-      });
+      detectorLus = setInterval(() => {
+        if (!scanActief() || video.readyState < 2) return;
+        try {
+          const beeld = pakScanBeeld(video);
+          if (!beeld) return;
+          const bron = new ZXing.HTMLCanvasElementLuminanceSource(beeld);
+          const bitmap = new ZXing.BinaryBitmap(new ZXing.HybridBinarizer(bron));
+          const res = zxingReader.decodeBitmap(bitmap);
+          if (res && scanActief()) verwerkScan(res.getText());
+        } catch (e) { /* niets gevonden in dit frame */ }
+      }, 200);
     }
   } catch (e) {
     camActief = false;
