@@ -4,7 +4,7 @@
  */
 'use strict';
 
-const VERSIE = '1.10.0';
+const VERSIE = '1.10.1';
 const DATA_REPO = 'VanSchieBV/magazijn-data';
 const API_BASE = 'https://api.github.com/repos/' + DATA_REPO + '/contents/';
 
@@ -1830,6 +1830,35 @@ function bindEvents() {
   });
 }
 
+// ---------- schermtoetsenbord: invoer niet laten bedekken ----------
+// de viewport is bewust overlays-content (scanscherm verspringt dan niet), dus
+// het toetsenbord valt óver de app heen. Hier meten we de toetsenbordhoogte en
+// zetten die in --kb: sheets krijgen er marge onder, en een invoerveld in het
+// gewone scherm wordt in beeld gescrold.
+function initToetsenbord() {
+  const zetKb = (hoogte) => {
+    document.documentElement.style.setProperty('--kb', Math.max(0, Math.round(hoogte)) + 'px');
+    if (hoogte > 40) {
+      const a = document.activeElement;
+      if (a && a.matches && a.matches('input, textarea') && !a.closest('.overlay')) {
+        setTimeout(() => { try { a.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (e) {} }, 120);
+      }
+    }
+  };
+  if ('virtualKeyboard' in navigator) {
+    try {
+      navigator.virtualKeyboard.overlaysContent = true;
+      navigator.virtualKeyboard.addEventListener('geometrychange', (e) => zetKb(e.target.boundingRect.height));
+      return;
+    } catch (e) { /* val terug op visualViewport */ }
+  }
+  // iOS en oudere browsers: daar verkleint het toetsenbord de visual viewport
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', () =>
+      zetKb(window.innerHeight - window.visualViewport.height));
+  }
+}
+
 // ---------- app-hoogte: exact de zichtbare vensterhoogte ----------
 // 100dvh rekent op Android met de ingeklapte adresbalk en maakt de pagina
 // dan scrollbaar; window.innerHeight volgt de echte viewport wel.
@@ -1877,6 +1906,7 @@ function registreerSw() {
 // ---------- start ----------
 function init() {
   zetAppHoogte();
+  initToetsenbord();
   laadLokaal();
   laadRondjeLokaal();
   bindEvents();
