@@ -4,7 +4,7 @@
  */
 'use strict';
 
-const VERSIE = '1.10.2';
+const VERSIE = '1.11.0';
 const DATA_REPO = 'VanSchieBV/magazijn-data';
 const API_BASE = 'https://api.github.com/repos/' + DATA_REPO + '/contents/';
 
@@ -1078,6 +1078,8 @@ function laadRondjeLokaal() {
   if (rondje.actief === undefined) rondje.actief = null;
   // ts 0: de standaardlijst verliest altijd van een bewust opgeslagen lijst
   if (!rondje.locUitz) rondje.locUitz = { ts: 0, lijst: ['ZOLDER', 'WPK', 'Oliehok'] };
+  // gebiedslabels (Boven, Zolder, …) die aan route-locaties gehangen kunnen worden
+  if (!rondje.gebieden) rondje.gebieden = { ts: 0, lijst: [] };
 }
 function bewaarRondje() { localStorage.setItem('mgz_rondje', JSON.stringify(rondje)); }
 
@@ -1163,10 +1165,12 @@ function mergeRondje(remote) {
     }
     actief = { gestart: Math.min(A.gestart, B.gestart), checks, scans };
   }
-  // uitzonderingenlijst: de laatst opgeslagen versie wint in zijn geheel
+  // uitzonderingen- en gebiedenlijst: de laatst opgeslagen versie wint in zijn geheel
   const locUitz = (!remote.locUitz || (rondje.locUitz && (rondje.locUitz.ts || 0) >= (remote.locUitz.ts || 0)))
     ? rondje.locUitz : remote.locUitz;
-  rondje = { route, actief, historie, archiefWacht: Array.from(awMap.values()), locUitz };
+  const gebieden = (!remote.gebieden || (rondje.gebieden && (rondje.gebieden.ts || 0) >= (remote.gebieden.ts || 0)))
+    ? rondje.gebieden : remote.gebieden;
+  rondje = { route, actief, historie, archiefWacht: Array.from(awMap.values()), locUitz, gebieden };
 }
 
 async function syncRondje() {
@@ -1197,7 +1201,7 @@ async function syncRondje() {
     const nieuw = JSON.stringify({
       route: rondje.route, actief: rondje.actief,
       historie: rondje.historie, archiefWacht: rondje.archiefWacht,
-      locUitz: rondje.locUitz
+      locUitz: rondje.locUitz, gebieden: rondje.gebieden
     });
     if (raw === null || nieuw !== raw) {
       await ghPut('rondje.json', nieuw, sha, 'Rondje bijgewerkt via app');
@@ -1291,7 +1295,7 @@ function rondjeAfronden(auto) {
   const items = routeItems().map(([id, item]) => {
     const c = checkVan(act, id);
     return {
-      loc: item.loc, label: item.label || '',
+      loc: item.loc, label: item.label || '', gebied: item.gebied || '',
       status: c ? c.w : 'open',
       ts: c ? c.ts : null, opm: c && c.opm ? c.opm : '', n: c ? (c.n || 0) : 0
     };
@@ -1394,7 +1398,8 @@ function renderRondje() {
     el.innerHTML = (act
       ? '<div class="status-ico' + (c && c.w !== 'skip' ? ' groen' : '') + '">' + (c ? (c.w === 'skip' ? '⏭' : '✓') : '○') + '</div>'
       : '') +
-      '<div class="mid"><div class="t1">' + esc(item.loc) + (item.label ? ' — ' + esc(item.label) : '') + '</div>' +
+      '<div class="mid"><div class="t1">' + esc(item.loc) + (item.label ? ' — ' + esc(item.label) : '') +
+      (item.gebied ? '<span class="gebied-chip">' + esc(item.gebied) + '</span>' : '') + '</div>' +
       '<div class="t2">' + esc(t2) + '</div></div>' +
       '<div class="right">' + (act && c ? statusBadge(c.w, c.n) : '') + '</div>';
     el.onclick = () => { if (rondje.actief) openCheckSheet(id); else openRouteSheet(id); };
@@ -1460,11 +1465,64 @@ function updateRondjeUI() {
 }
 
 // ---------- rondje sheets ----------
+let routeSheetGebied = null;
+
+function renderRouteTags() {
+  const div = $('routeTags');
+  div.innerHTML = '';
+  if (!rondje.gebieden.lijst.length) {
+    div.innerHTML = '<div style="color:var(--muted);font-size:.78rem;">Nog geen gebieden — maak er hieronder een aan.</div>';
+    return;
+  }
+  for (const g of rondje.gebieden.lijst) {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'tag-chip' + (routeSheetGebied === g ? ' sel' : '');
+    chip.innerHTML = esc(g) + '<span class="tag-del" aria-label="Gebied verwijderen">✕</span>';
+    chip.onclick = (e) => {
+      if (e.target.classList.contains('tag-del')) { verwijderGebied(g); return; }
+      routeSheetGebied = routeSheetGebied === g ? null : g;
+      renderRouteTags();
+    };
+    div.appendChild(chip);
+  }
+}
+
+function voegGebiedToe() {
+  const naam = $('inpNieuwGebied').value.trim();
+  if (!naam) return;
+  const bestaand = rondje.gebieden.lijst.find(g => g.toLowerCase() === naam.toLowerCase());
+  if (!bestaand) {
+    rondje.gebieden = { ts: Date.now(), lijst: rondje.gebieden.lijst.concat(naam) };
+    bewaarRondje();
+    planRondjeSync();
+  }
+  routeSheetGebied = bestaand || naam;
+  $('inpNieuwGebied').value = '';
+  renderRouteTags();
+}
+
+function verwijderGebied(g) {
+  if (!confirm('Gebied "' + g + '" verwijderen?\n\nHet wordt ook weggehaald bij locaties met dit gebied.')) return;
+  rondje.gebieden = { ts: Date.now(), lijst: rondje.gebieden.lijst.filter(x => x !== g) };
+  for (const item of Object.values(rondje.route)) {
+    if (!item.del && item.gebied === g) { delete item.gebied; item.ts = Date.now(); }
+  }
+  if (routeSheetGebied === g) routeSheetGebied = null;
+  bewaarRondje();
+  planRondjeSync();
+  renderRouteTags();
+  renderRondje();
+}
+
 function openRouteSheet(id) {
   routeSheetId = id || null;
+  routeSheetGebied = id ? (rondje.route[id].gebied || null) : null;
   $('routeSheetTitel').textContent = id ? 'Locatie bewerken' : 'Locatie toevoegen';
   $('inpRouteLoc').value = id ? rondje.route[id].loc : '';
   $('inpRouteLabel').value = id ? (rondje.route[id].label || '') : '';
+  $('inpNieuwGebied').value = '';
+  renderRouteTags();
   $('routeDelRow').hidden = !id;
   let hh = '';
   if (id) {
@@ -1495,10 +1553,12 @@ function bewaarRouteItem() {
     const item = rondje.route[routeSheetId];
     item.loc = loc;
     item.label = label;
+    if (routeSheetGebied) item.gebied = routeSheetGebied; else delete item.gebied;
     item.ts = Date.now();
   } else {
     const id = 'r' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
     rondje.route[id] = { loc, label, ts: Date.now() };
+    if (routeSheetGebied) rondje.route[id].gebied = routeSheetGebied;
   }
   bewaarRondje();
   planRondjeSync();
@@ -1528,7 +1588,8 @@ function openCheckSheet(id) {
   if (!item || item.del || !act) return;
   checkSheetId = id;
   const c = checkVan(act, id);
-  $('checkTitel').textContent = item.loc + (item.label ? ' — ' + item.label : '');
+  $('checkTitel').textContent = item.loc + (item.label ? ' — ' + item.label : '') +
+    (item.gebied ? ' · ' + item.gebied : '');
   $('checkStatus').textContent = statusTekstCheck(c);
   $('inpCheckOpm').value = c && c.opm ? c.opm : '';
   $('btnCheckReset').hidden = !c;
@@ -1594,7 +1655,8 @@ function openHistSheet(hs) {
     esc(fmtTijd.format(hs.gestart)) + ' – ' + esc(fmtTijd.format(hs.afgerond)) + '</div>';
   for (const it of hs.items) {
     h += '<div class="item" style="cursor:default;"><div class="mid"><div class="t1">' +
-      esc(it.loc) + (it.label ? ' — ' + esc(it.label) : '') + '</div>' +
+      esc(it.loc) + (it.label ? ' — ' + esc(it.label) : '') +
+      (it.gebied ? '<span class="gebied-chip">' + esc(it.gebied) + '</span>' : '') + '</div>' +
       (it.opm ? '<div class="t2">💬 ' + esc(it.opm) + '</div>' : '') +
       '</div><div class="right">' + statusBadge(it.status, it.n) + '</div></div>';
   }
@@ -1644,9 +1706,9 @@ function downloadRondjeCsv(vol) {
     return /[;"\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
   };
   const st = { scan: 'gecontroleerd (scan)', hand: 'gecontroleerd (handmatig)', skip: 'overgeslagen', open: 'niet gedaan' };
-  const regels = ['Locatie;Label;Status;Tijd;Scans;Opmerking'];
+  const regels = ['Locatie;Label;Gebied;Status;Tijd;Scans;Opmerking'];
   for (const it of vol.items) {
-    regels.push([it.loc, it.label || '', st[it.status] || it.status,
+    regels.push([it.loc, it.label || '', it.gebied || '', st[it.status] || it.status,
       it.ts ? fmtTijd.format(it.ts) : '', it.n || '', it.opm || ''].map(cel).join(';'));
   }
   if ((vol.scans || []).length) {
@@ -1765,6 +1827,8 @@ function bindEvents() {
   $('btnRouteOpslaan').addEventListener('click', bewaarRouteItem);
   $('btnRouteSluit').addEventListener('click', () => $('routeOverlay').classList.remove('open'));
   $('btnRouteDel').addEventListener('click', verwijderRouteItem);
+  $('btnNieuwGebied').addEventListener('click', voegGebiedToe);
+  $('inpNieuwGebied').addEventListener('keydown', e => { if (e.key === 'Enter') voegGebiedToe(); });
   $('btnCheckKlopt').addEventListener('click', () => zetCheck('hand'));
   $('btnCheckSkip').addEventListener('click', () => zetCheck('skip'));
   $('btnCheckReset').addEventListener('click', resetCheck);

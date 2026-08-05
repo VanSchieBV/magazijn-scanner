@@ -723,6 +723,37 @@ input.masked { -webkit-text-security: disc; }
 .item.r-skip { opacity: 0.55; }
 /* ⚠ achter een locatie: afwijkende notatie (typfout in het bronsysteem) */
 .loc-fout { color: var(--yellow); cursor: help; }
+/* gebiedslabels (Boven, Zolder, …): chips om toe te wijzen + klein bij de locatie */
+.tag-rij { display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0 10px; }
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 999px;
+  padding: 8px 13px;
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+.tag-chip.sel { border-color: var(--green); color: var(--green); background: var(--green-dim); }
+.tag-chip .tag-del { color: var(--muted); font-size: 0.82em; padding: 2px; }
+.tag-nieuw-rij { display: flex; gap: 8px; }
+.tag-nieuw-rij input { flex: 1; min-width: 0; }
+.tag-nieuw-rij .btn { flex: none; }
+.gebied-chip {
+  display: inline-block;
+  background: var(--surface-3);
+  color: var(--muted);
+  border-radius: 999px;
+  padding: 2px 9px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  vertical-align: 2px;
+  margin-left: 5px;
+}
 .set-row select {
   width: 100%;
   background: var(--bg);
