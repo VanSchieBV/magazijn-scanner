@@ -8,7 +8,7 @@ param([string]$Bestand)
 $ErrorActionPreference = 'Stop'
 $Repo = 'VanSchieBV/magazijn-data'
 # Bronmap: nieuwste "Export Artikelen.xlsx" of ".csv" wint (csv komt er later automatisch)
-$BronMap = 'C:\Users\td\Projecten_AI\Magazijn scanner\Bron'
+$BronMap = 'C:\Users\td\Projecten_AI\MagazijnScanner\Bron'
 
 function Wacht {
     if ($env:MGZ_STIL) { return }

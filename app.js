@@ -1,10 +1,10 @@
 /* Magazijn Scanner — app-logica
- * Data: privé-repo VanSchieBV/magazijn-data (artikelen.json / telling.json)
+ * Data: privé-repo VanSchieBV/magazijn-data (artikelen.json / telling.json / rondje.json)
  * Sync: GitHub Contents API met fine-grained PAT (alleen die repo, Contents r/w)
  */
 'use strict';
 
-const VERSIE = '1.7.0';
+const VERSIE = '1.10.0';
 const DATA_REPO = 'VanSchieBV/magazijn-data';
 const API_BASE = 'https://api.github.com/repos/' + DATA_REPO + '/contents/';
 
@@ -27,6 +27,23 @@ const $ = (id) => document.getElementById(id);
 const levend = (it) => (it && !it.del ? it : null);
 const esc = (s) => String(s == null ? '' : s)
   .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+// juiste locatienotatie: kast.plank of kast.plank.breedte, eventueel met -diepte
+// (bijv. 1.1, 53.4.11, 21.10.5-4, 54.3.5-b, 21.5.8-7a) — al het andere is een
+// typfout in het bronsysteem; de app snapt die locaties wél, maar markeert ze met ⚠
+const LOC_NOTATIE = /^\d+\.\d+(\.\d+)?(-[0-9a-z]+)?$/i;
+// bewust gekozen vrije locaties (ZOLDER, WPK, Oliehok, …) staan op een
+// uitzonderingenlijst (Instellingen → Artikellijst) en tellen als juiste notatie
+function locUitzondering(l) {
+  const s = String(l).trim().toLowerCase();
+  return ((rondje.locUitz && rondje.locUitz.lijst) || []).some(u => u.trim().toLowerCase() === s);
+}
+function locNotatieOk(l) { return LOC_NOTATIE.test(String(l).trim()) || locUitzondering(l); }
+function locHtml(l) {
+  if (!l) return '–';
+  return esc(l) + (locNotatieOk(l) ? ''
+    : ' <span class="loc-fout" title="Afwijkende notatie — hoort kast.plank.breedte(-diepte) te zijn">⚠</span>');
+}
 
 // ---------- opslag ----------
 function laadLokaal() {
@@ -143,9 +160,32 @@ async function verversArtikelen(stil) {
 }
 
 function updateArtInfo() {
-  $('artInfo').textContent = artikelen.length
-    ? artikelen.length + ' artikelen · export van ' + artMeta.bijgewerkt
+  const fout = artikelen.filter(a => a.l && !locNotatieOk(a.l));
+  $('artInfo').innerHTML = artikelen.length
+    ? esc(artikelen.length + ' artikelen · export van ' + artMeta.bijgewerkt) +
+      (fout.length ? '<br><span class="loc-fout">⚠ ' + fout.length + ' met afwijkende locatienotatie</span>' : '')
     : 'Nog geen artikellijst geladen.';
+  $('btnLocFouten').hidden = !fout.length;
+}
+
+// lijst van artikelen waarvan de locatie niet als kast.plank.breedte(-diepte)
+// genoteerd staat — om de typfouten in het bronsysteem stap voor stap op te lossen
+function downloadLocFouten() {
+  const fout = artikelen.filter(a => a.l && !locNotatieOk(a.l))
+    .sort((a, b) => String(a.l).localeCompare(String(b.l), undefined, { numeric: true }));
+  if (!fout.length) { toast('Alle locaties staan goed genoteerd 🎉'); return; }
+  const cel = (v) => {
+    v = String(v == null ? '' : v);
+    return /[;"\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+  };
+  const regels = ['Locatie;Artikelnummer;Korte omschrijving;Barcode'];
+  for (const a of fout) regels.push([a.l, a.a, a.o, a.b].map(cel).join(';'));
+  const blob = new Blob(['﻿' + regels.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+  const el = document.createElement('a');
+  el.href = URL.createObjectURL(blob);
+  el.download = 'Afwijkende locaties ' + new Date().toISOString().slice(0, 10) + '.csv';
+  el.click();
+  URL.revokeObjectURL(el.href);
 }
 
 // ---------- telling sync ----------
@@ -406,7 +446,7 @@ function toonKiezer(treffers, code) {
     const el = document.createElement('div');
     el.className = 'item';
     el.innerHTML = '<div class="mid"><div class="t1">' + esc(art.o) + '</div>' +
-      '<div class="t2">' + esc(art.a) + ' · locatie ' + esc(art.l || '?') + '</div></div>' +
+      '<div class="t2">' + esc(art.a) + ' · locatie ' + locHtml(art.l || '?') + '</div></div>' +
       '<div class="right"><span class="badge groen">' + esc(art.v) + '</span></div>';
     el.onclick = () => { $('kiesOverlay').classList.remove('open'); openPaneel(art); };
     div.appendChild(el);
@@ -424,7 +464,8 @@ function openPaneel(art, behoudBlader) {
     (bestaand ? ' <span class="badge groen">al geteld</span>' : '') +
     (bestaand && bestaand.bsd ? ' <span class="badge geel">🛒 besteld</span>' : '') + '</div>';
   $('artGrid').innerHTML =
-    veld('Locatie', esc(art.l || '–'), 'big') +
+    veld('Locatie', esc(art.l || '–') +
+      (art.l && !locNotatieOk(art.l) ? ' <span class="badge geel" title="Hoort kast.plank.breedte(-diepte) te zijn">⚠ notatie</span>' : ''), 'big') +
     veld('Tech. voorraad', esc(art.v || '0'), 'groen big') +
     veld('Crediteur', esc(art.c || '–')) +
     veld('Fabrikantcode', esc(art.f || '–') +
@@ -549,7 +590,9 @@ function wisselBesteld() {
   bewaarTelling();
   planSync();
   renderAlles();
-  toast('🛒 ' + (huidigArt.a || huidigArt.b) + ' besteld');
+  const rondjeNieuw = rondjeRegistreerScan(entry);
+  toast('🛒 ' + (huidigArt.a || huidigArt.b) + ' besteld' +
+    (rondjeNieuw.length ? ' · 📍 ' + rondjeNieuw.join(', ') + ' ✓' : ''));
   if (bladerIdx >= 0 && bladerIdx < bladerKeys.length - 1) blader(1);
   else { updateBladerUI(); updateBesteldKnop(); }
 }
@@ -631,7 +674,9 @@ function slaOp(kloptDirect) {
   bewaarTelling();
   planSync();
   const naam = art.a || art.b;
-  toast(kloptDirect ? ('✓ ' + naam + ' klopt (' + entry.g + ')') : ('✓ ' + naam + ' opgeslagen'));
+  const rondjeNieuw = rondjeRegistreerScan(entry);
+  const extra = rondjeNieuw.length ? ' · 📍 ' + rondjeNieuw.join(', ') + ' ✓' : '';
+  toast(kloptDirect ? ('✓ ' + naam + ' klopt (' + entry.g + ')' + extra) : ('✓ ' + naam + ' opgeslagen' + extra));
   sluitPaneel();
   renderAlles();
   if ($('swDoorscannen').checked) startScanner();
@@ -666,7 +711,7 @@ function handmatigZoeken() {
     const el = document.createElement('div');
     el.className = 'item';
     el.innerHTML = '<div class="mid"><div class="t1">' + esc(art.o) + '</div>' +
-      '<div class="t2">' + esc(art.a) + ' · ' + esc(art.l || 'geen locatie') + '</div></div>' +
+      '<div class="t2">' + esc(art.a) + ' · ' + (art.l ? locHtml(art.l) : 'geen locatie') + '</div></div>' +
       '<div class="right"><span class="badge groen">' + esc(art.v) + '</span></div>';
     el.onclick = () => { div.innerHTML = ''; $('zoekInput').value = ''; openPaneel(art); };
     div.appendChild(el);
@@ -686,7 +731,7 @@ function maakLijstItem(it) {
   el.className = 'item' + (it.kl ? ' klaar' : '');
   el.innerHTML = '<input type="checkbox" class="lijst-klaar" aria-label="Klaar"' + (it.kl ? ' checked' : '') + '>' +
     '<div class="mid"><div class="t1">' + esc(it.o) + '</div>' +
-    '<div class="t2">' + esc(it.a || it.b) + ' · ' + esc(it.l || '–') +
+    '<div class="t2">' + esc(it.a || it.b) + ' · ' + locHtml(it.l) +
     (it.opm ? ' · 💬 ' + esc(it.opm) : '') + '</div></div>' +
     '<div class="right">' + badgeHtml + '</div>' +
     (it.kl ? '<button class="lijst-del" aria-label="Verwijderen">✕</button>' : '');
@@ -827,7 +872,7 @@ function renderOverzicht() {
       const sys = parseInt(it.v, 10) || 0;
       const afwijkend = !it.onb && it.g !== sys;
       h += '<tr data-key="' + esc(it.b) + '"><td><b>' + esc(it.a || it.b) + '</b><br><span style="color:var(--muted)">' + esc(it.o) + '</span></td>' +
-        '<td>' + esc(it.l || '–') + '</td><td class="num">' + (it.onb ? '–' : sys) + '</td>' +
+        '<td>' + locHtml(it.l) + '</td><td class="num">' + (it.onb ? '–' : sys) + '</td>' +
         '<td class="num" style="font-weight:600' + (afwijkend ? ';color:var(--red)' : ';color:var(--green)') + '">' + it.g + '</td></tr>';
     }
     $('ovGeteld').innerHTML = h + '</table>';
@@ -843,7 +888,7 @@ function renderOverzicht() {
       const sys = parseInt(it.v, 10) || 0;
       const d = it.g - sys;
       h += '<tr data-key="' + esc(it.b) + '"><td><b>' + esc(it.a) + '</b><br><span style="color:var(--muted)">' + esc(it.o) + '</span></td>' +
-        '<td>' + esc(it.l || '–') + '</td><td class="num">' + sys + '</td><td class="num">' + it.g + '</td>' +
+        '<td>' + locHtml(it.l) + '</td><td class="num">' + sys + '</td><td class="num">' + it.g + '</td>' +
         '<td class="num" style="color:var(--red);font-weight:600">' + (d > 0 ? '+' : '') + d + '</td></tr>';
     }
     $('ovVerschillen').innerHTML = h + '</table>';
@@ -869,7 +914,7 @@ function renderOverzicht() {
       for (const it of regels) {
         const hun = it.h || it.f || '';
         h += '<tr data-key="' + esc(it.b) + '"' + (it.bsd ? ' class="rij-besteld"' : '') + '><td><b class="art-kopie" data-kopieer="' + esc(it.a || it.b) + '">' + esc(it.a || it.b) + '</b><br><span style="color:var(--muted)">' + esc(it.o) + '</span></td>' +
-          (hun ? '<td class="hun-kopie" data-kopieer="' + esc(hun) + '">' + esc(hun) + '</td>' : '<td>–</td>') + '<td>' + esc(it.l || '–') + '</td>' +
+          (hun ? '<td class="hun-kopie" data-kopieer="' + esc(hun) + '">' + esc(hun) + '</td>' : '<td>–</td>') + '<td>' + locHtml(it.l) + '</td>' +
           '<td class="num"><input type="text" class="ov-aantal" data-key="' + esc(it.b) + '" inputmode="numeric" maxlength="4" value="' + it.best + '"></td>' +
           '<td class="besteld-cel"><input type="checkbox" class="ov-besteld" data-key="' + esc(it.b) + '"' + (it.bsd ? ' checked' : '') + '>' +
           '<input type="text" class="ov-ink" data-key="' + esc(it.b) + '" inputmode="numeric" maxlength="8" value="' + esc(it.ink || '') + '"></td></tr>';
@@ -935,7 +980,7 @@ function renderOverzicht() {
     let h = '<table><tr><th>Artikel</th><th>Locatie</th><th>Opmerking</th></tr>';
     for (const it of opmerkingen) {
       h += '<tr data-key="' + esc(it.b) + '"><td><b>' + esc(it.a || it.b) + '</b><br><span style="color:var(--muted)">' + esc(it.o) + '</span></td>' +
-        '<td>' + esc(it.l || '–') + '</td><td>' + esc(it.opm) + '</td></tr>';
+        '<td>' + locHtml(it.l) + '</td><td>' + esc(it.opm) + '</td></tr>';
     }
     $('ovOpmerkingen').innerHTML = h + '</table>';
     koppelOverzichtRijen($('ovOpmerkingen'));
@@ -945,14 +990,15 @@ function renderOverzicht() {
 function downloadCsv() {
   const items = Object.values(telling.items).filter(it => !it.del).sort((a, b) => (a.l || '').localeCompare(b.l || ''));
   if (!items.length) { toast('Nog niets geteld', true); return; }
-  const kol = ['Barcode','Artikelnummer','Korte omschrijving','Fabrikantcode','Hun nummer','Locatie','Tech. Voorraad','Geteld','Crediteur','Bestellen','Besteld','Inkoopnummer','Opmerking'];
+  const kol = ['Barcode','Artikelnummer','Korte omschrijving','Fabrikantcode','Hun nummer','Locatie','Locatienotatie','Tech. Voorraad','Geteld','Crediteur','Bestellen','Besteld','Inkoopnummer','Opmerking'];
   const cel = (v) => {
     v = String(v == null ? '' : v);
     return /[;"\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
   };
   const regels = [kol.join(';')];
   for (const it of items) {
-    regels.push([it.b, it.a, it.o, it.f, it.h, it.l, it.v,
+    regels.push([it.b, it.a, it.o, it.f, it.h, it.l,
+      it.l && !locNotatieOk(it.l) ? 'afwijkend' : '', it.v,
       it.g != null ? it.g : '', credVan(it), it.best != null ? it.best : '',
       it.bsd ? 'ja' : '', it.ink || '', it.opm].map(cel).join(';'));
   }
@@ -1002,6 +1048,641 @@ async function syncTellingDirect() {
   while (syncBezig) await new Promise(r => setTimeout(r, 200));
 }
 
+// ---------- wekelijks rondje ----------
+// route:   {id: {loc,label,volg,ts,del?}} — de vaste controleroute (gesynct via rondje.json)
+// actief:  null | {gestart, checks:{id:{ts,w,n,opm}}, scans:{barcode:{…}}}
+//          w: 'scan' (automatisch via een scan), 'hand' (handmatig afgevinkt),
+//             'skip' (deze ronde overgeslagen), 'reset' (tombstone: vinkje weggehaald)
+// historie: compacte samenvattingen per rondje; het volledige rapport (incl. alle
+//           scans) staat in archief/rondje-<id>.json en wordt op verzoek opgehaald
+let rondje = { route: {}, actief: null, historie: [], archiefWacht: [] };
+let rondjeSyncTimer = null;
+let rondjeSyncBezig = false;
+let rondjeSyncNodig = false;
+let routeSheetId = null;
+let checkSheetId = null;
+let histCsvData = null;
+
+const fmtDatum = new Intl.DateTimeFormat('nl-NL', { weekday: 'short', day: 'numeric', month: 'short' });
+const fmtTijd = new Intl.DateTimeFormat('nl-NL', { hour: '2-digit', minute: '2-digit' });
+
+function laadRondjeLokaal() {
+  try {
+    const r = localStorage.getItem('mgz_rondje');
+    if (r) rondje = JSON.parse(r);
+  } catch (e) { /* corrupte cache negeren */ }
+  if (!rondje.route) rondje.route = {};
+  if (!rondje.historie) rondje.historie = [];
+  if (!rondje.archiefWacht) rondje.archiefWacht = [];
+  if (rondje.actief === undefined) rondje.actief = null;
+  // ts 0: de standaardlijst verliest altijd van een bewust opgeslagen lijst
+  if (!rondje.locUitz) rondje.locUitz = { ts: 0, lijst: ['ZOLDER', 'WPK', 'Oliehok'] };
+}
+function bewaarRondje() { localStorage.setItem('mgz_rondje', JSON.stringify(rondje)); }
+
+// locaties: kast.plank.breedte[-diepte] — een route-item dekt alles wat eronder valt
+function locSegmenten(l) {
+  return String(l || '').trim().split(/[.\-]/).map(s => s.trim()).filter(s => s !== '');
+}
+function segGelijk(a, b) {
+  if (a === b) return true;
+  if (/^\d+$/.test(a) && /^\d+$/.test(b)) return parseInt(a, 10) === parseInt(b, 10);
+  return a.toUpperCase() === b.toUpperCase();
+}
+function locValtBinnen(routeLoc, artLoc) {
+  const r = locSegmenten(routeLoc), a = locSegmenten(artLoc);
+  if (!r.length || a.length < r.length) return false;
+  return r.every((s, i) => segGelijk(s, a[i]));
+}
+
+function routeItems() {
+  return Object.entries(rondje.route).filter(x => !x[1].del)
+    .sort((a, b) => (a[1].volg || 0) - (b[1].volg || 0) ||
+      String(a[1].loc).localeCompare(String(b[1].loc), undefined, { numeric: true }));
+}
+// een check met w:'reset' is een tombstone (vinkje weggehaald) en telt als "geen check"
+function checkVan(act, id) {
+  const c = act && act.checks ? act.checks[id] : null;
+  return c && c.w !== 'reset' ? c : null;
+}
+function isoWeekKey(ts) {
+  const d = new Date(ts);
+  const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  const dag = (t.getUTCDay() + 6) % 7;
+  t.setUTCDate(t.getUTCDate() - dag + 3);
+  const w1 = new Date(Date.UTC(t.getUTCFullYear(), 0, 4));
+  const week = 1 + Math.round(((t - w1) / 86400000 - 3 + ((w1.getUTCDay() + 6) % 7)) / 7);
+  return t.getUTCFullYear() + '-W' + week;
+}
+// het rondje "staat open" vanaf de vaste dag zolang het deze week nog niet gelopen is
+function rondjeDue() {
+  const dag = localStorage.getItem('mgz_rondjedag');
+  if (dag === null || dag === '') return false;
+  if (rondje.actief || !routeItems().length) return false;
+  const nu = Date.now();
+  const laatste = rondje.historie.length ? rondje.historie[rondje.historie.length - 1].afgerond : 0;
+  if (laatste && isoWeekKey(laatste) === isoWeekKey(nu)) return false;
+  return (new Date().getDay() + 6) % 7 >= parseInt(dag, 10);
+}
+
+// ---------- rondje sync ----------
+function planRondjeSync() {
+  rondjeSyncNodig = true;
+  clearTimeout(rondjeSyncTimer);
+  rondjeSyncTimer = setTimeout(syncRondje, 1500);
+}
+
+function mergeRondje(remote) {
+  if (!remote) return;
+  const route = Object.assign({}, remote.route || {});
+  for (const [k, v] of Object.entries(rondje.route)) {
+    if (!route[k] || (v.ts || 0) > (route[k].ts || 0)) route[k] = v;
+  }
+  const histMap = new Map();
+  for (const h of (remote.historie || [])) histMap.set(h.id, h);
+  for (const h of rondje.historie) if (!histMap.has(h.id)) histMap.set(h.id, h);
+  const historie = Array.from(histMap.values()).sort((a, b) => (a.afgerond || 0) - (b.afgerond || 0));
+  const awMap = new Map();
+  for (const a of (remote.archiefWacht || [])) awMap.set(a.id, a);
+  for (const a of rondje.archiefWacht) awMap.set(a.id, a);
+  // een actief rondje van vóór het laatst afgeronde rondje is verouderd (ander
+  // apparaat heeft al afgerond) en vervalt
+  const laatste = historie.length ? (historie[historie.length - 1].afgerond || 0) : 0;
+  const geldig = a => (a && (a.gestart || 0) > laatste) ? a : null;
+  const A = geldig(rondje.actief), B = geldig(remote.actief);
+  let actief = A || B;
+  if (A && B) {
+    const checks = Object.assign({}, B.checks || {});
+    for (const [k, v] of Object.entries(A.checks || {})) {
+      if (!checks[k] || (v.ts || 0) > (checks[k].ts || 0)) checks[k] = v;
+    }
+    const scans = Object.assign({}, B.scans || {});
+    for (const [k, v] of Object.entries(A.scans || {})) {
+      if (!scans[k] || (v.ts || 0) > (scans[k].ts || 0)) scans[k] = v;
+    }
+    actief = { gestart: Math.min(A.gestart, B.gestart), checks, scans };
+  }
+  // uitzonderingenlijst: de laatst opgeslagen versie wint in zijn geheel
+  const locUitz = (!remote.locUitz || (rondje.locUitz && (rondje.locUitz.ts || 0) >= (remote.locUitz.ts || 0)))
+    ? rondje.locUitz : remote.locUitz;
+  rondje = { route, actief, historie, archiefWacht: Array.from(awMap.values()), locUitz };
+}
+
+async function syncRondje() {
+  if (!getToken() || !navigator.onLine) return;
+  if (rondjeSyncBezig) { planRondjeSync(); return; }
+  rondjeSyncBezig = true;
+  rondjeSyncNodig = false;
+  try {
+    let sha = null;
+    const raw = await ghGetRaw('rondje.json');
+    let remote = null;
+    if (raw !== null) {
+      const info = await ghDirInfo('rondje.json');
+      sha = info ? info.sha : null;
+      try { remote = JSON.parse(raw); } catch (e) { remote = null; }
+    }
+    mergeRondje(remote);
+    // afgeronde rondjes die nog niet in het archief staan alsnog wegschrijven
+    for (const rap of rondje.archiefWacht.slice()) {
+      try {
+        await ghPut('archief/rondje-' + rap.id + '.json', JSON.stringify(rap), null, 'Rondje afgerond');
+        rondje.archiefWacht = rondje.archiefWacht.filter(x => x.id !== rap.id);
+      } catch (e) {
+        if (e.status === 422) rondje.archiefWacht = rondje.archiefWacht.filter(x => x.id !== rap.id); // stond er al
+        else throw e;
+      }
+    }
+    const nieuw = JSON.stringify({
+      route: rondje.route, actief: rondje.actief,
+      historie: rondje.historie, archiefWacht: rondje.archiefWacht,
+      locUitz: rondje.locUitz
+    });
+    if (raw === null || nieuw !== raw) {
+      await ghPut('rondje.json', nieuw, sha, 'Rondje bijgewerkt via app');
+    }
+    bewaarRondje();
+  } catch (e) {
+    if (e.status === 409 || e.status === 422) planRondjeSync();
+    else rondjeSyncNodig = true;
+  } finally {
+    rondjeSyncBezig = false;
+    updateRondjeUI();
+    if (rondjeSyncNodig && navigator.onLine) {
+      clearTimeout(rondjeSyncTimer);
+      rondjeSyncTimer = setTimeout(syncRondje, 8000);
+    }
+  }
+}
+
+// ---------- rondje kernacties ----------
+// aangeroepen bij elke opgeslagen registratie (opslaan / klopt / besteld):
+// logt de scan bij het lopende rondje en vinkt passende route-locaties af.
+// geeft de namen van nieuw afgevinkte locaties terug (voor in de toast).
+function rondjeRegistreerScan(entry) {
+  const act = rondje.actief;
+  if (!act) return [];
+  act.scans[entry.b] = {
+    ts: entry.ts, b: entry.b, a: entry.a || '', o: entry.o || '', l: entry.l || '',
+    g: entry.g != null ? entry.g : null, best: entry.best != null ? entry.best : null,
+    opm: entry.opm || '', bsd: entry.bsd ? 1 : 0
+  };
+  const nieuw = [];
+  if (entry.l) {
+    for (const [id, item] of routeItems()) {
+      if (!locValtBinnen(item.loc, entry.l)) continue;
+      const c = checkVan(act, id);
+      if (!c) {
+        act.checks[id] = { ts: Date.now(), w: 'scan', n: 1, opm: (act.checks[id] && act.checks[id].opm) || '' };
+        nieuw.push(item.label || item.loc);
+      } else {
+        c.n = (c.n || 0) + 1;
+        c.ts = Date.now();
+        if (c.w === 'skip') { c.w = 'scan'; nieuw.push(item.label || item.loc); }
+      }
+    }
+  }
+  bewaarRondje();
+  planRondjeSync();
+  updateRondjeUI();
+  // even wachten met auto-afronden zodat de opslaan-toast niet ondersneeuwt
+  setTimeout(controleerAutoAfronden, 700);
+  return nieuw;
+}
+
+function controleerAutoAfronden() {
+  const act = rondje.actief;
+  if (!act) return;
+  const items = routeItems();
+  if (!items.length) return;
+  const klaar = items.every(([id]) => {
+    const c = checkVan(act, id);
+    return c && c.w !== 'skip';
+  });
+  if (klaar) rondjeAfronden(true);
+}
+
+function rondjeStart() {
+  if (rondje.actief) return;
+  if (!routeItems().length) { toast('Voeg eerst locaties toe aan de route', true); return; }
+  rondje.actief = { gestart: Date.now(), checks: {}, scans: {} };
+  bewaarRondje();
+  planRondjeSync();
+  renderRondje();
+  updateRondjeUI();
+  toast('▶ Rondje gestart — scan zoals altijd, locaties vinken vanzelf af');
+}
+
+function rondjeAnnuleer() {
+  if (!rondje.actief) return;
+  if (!confirm('Rondje annuleren?\n\nDe voortgang van dit rondje wordt gewist (er wordt niets vastgelegd).')) return;
+  rondje.actief = null;
+  bewaarRondje();
+  planRondjeSync();
+  renderRondje();
+  updateRondjeUI();
+  toast('Rondje geannuleerd');
+}
+
+function rondjeAfronden(auto) {
+  const act = rondje.actief;
+  if (!act) return;
+  const items = routeItems().map(([id, item]) => {
+    const c = checkVan(act, id);
+    return {
+      loc: item.loc, label: item.label || '',
+      status: c ? c.w : 'open',
+      ts: c ? c.ts : null, opm: c && c.opm ? c.opm : '', n: c ? (c.n || 0) : 0
+    };
+  });
+  if (!auto) {
+    const open = items.filter(i => i.status === 'open').length;
+    let msg = 'Rondje afronden?';
+    if (open) msg += '\n\n' + open + ' locatie(s) zijn niet gecontroleerd — die worden als "niet gedaan" vastgelegd.';
+    if (!confirm(msg)) return;
+  }
+  const d = new Date();
+  const id = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' +
+    String(d.getDate()).padStart(2, '0') + '_' + String(d.getHours()).padStart(2, '0') +
+    String(d.getMinutes()).padStart(2, '0');
+  const scans = Object.values(act.scans).sort((a, b) => (a.ts || 0) - (b.ts || 0));
+  rondje.historie.push({ id, gestart: act.gestart, afgerond: Date.now(), items, scans: scans.length });
+  // het volledige rapport gaat naar archief/rondje-<id>.json zodra er verbinding is
+  rondje.archiefWacht.push({ id, gestart: act.gestart, afgerond: Date.now(), items, scans });
+  rondje.actief = null;
+  bewaarRondje();
+  planRondjeSync();
+  renderRondje();
+  updateRondjeUI();
+  toast(auto ? '🎉 Alle locaties gecontroleerd — rondje afgerond' : '✓ Rondje afgerond');
+}
+
+// ---------- rondje weergave ----------
+function statusBadge(status, n) {
+  if (status === 'scan') return '<span class="badge groen">✓ ' + (n ? n + ' scan' + (n > 1 ? 's' : '') : 'gescand') + '</span>';
+  if (status === 'hand') return '<span class="badge groen">✓ afgevinkt</span>';
+  if (status === 'skip') return '<span class="badge geel">⏭ overgeslagen</span>';
+  return '<span class="badge rood">niet gedaan</span>';
+}
+function statusTekstCheck(c) {
+  if (!c) return 'Nog niet gecontroleerd deze ronde';
+  if (c.w === 'skip') return 'Overgeslagen · ' + fmtTijd.format(c.ts);
+  if (c.w === 'scan') return 'Afgevinkt via ' + (c.n || 1) + ' scan' + ((c.n || 1) > 1 ? 's' : '') + ' · ' + fmtTijd.format(c.ts);
+  return 'Handmatig afgevinkt · ' + fmtTijd.format(c.ts);
+}
+// laatste geslaagde controle van een locatie, uit de historie
+function laatsteControle(loc) {
+  for (let i = rondje.historie.length - 1; i >= 0; i--) {
+    const it = (rondje.historie[i].items || []).find(x => x.loc === loc);
+    if (it && (it.status === 'scan' || it.status === 'hand')) return rondje.historie[i].afgerond;
+  }
+  return null;
+}
+
+function renderRondje() {
+  const items = routeItems();
+  const act = rondje.actief;
+
+  // statuskaart
+  let h;
+  if (act) {
+    const gedaan = items.filter(([id]) => { const c = checkVan(act, id); return c && c.w !== 'skip'; }).length;
+    const skip = items.filter(([id]) => { const c = checkVan(act, id); return c && c.w === 'skip'; }).length;
+    h = '<div class="card"><h2>Rondje bezig</h2>' +
+      '<div style="color:var(--muted);font-size:.83rem;">Gestart ' + fmtTijd.format(act.gestart) +
+      ' · scan zoals altijd, locaties vinken vanzelf af. Tik een locatie om handmatig af te vinken of over te slaan.</div>' +
+      '<div class="rondje-balk"><div style="width:' + (items.length ? Math.round(gedaan / items.length * 100) : 0) + '%"></div></div>' +
+      '<div style="font-size:.85rem;color:var(--muted);margin-top:6px;">' + gedaan + ' van ' + items.length + ' gecontroleerd' +
+      (skip ? ' · ' + skip + ' overgeslagen' : '') + '</div>' +
+      '<div class="btn-row"><button class="btn geel" id="btnRondjeAfronden">Rondje afronden</button>' +
+      '<button class="btn stil klein rood" id="btnRondjeAnnuleer">✕</button></div></div>';
+  } else {
+    const laatste = rondje.historie.length ? rondje.historie[rondje.historie.length - 1] : null;
+    let sub;
+    if (laatste) {
+      const gedaan = laatste.items.filter(i => i.status === 'scan' || i.status === 'hand').length;
+      sub = 'Laatste rondje: ' + fmtDatum.format(laatste.afgerond) + ' · ' + gedaan + ' van ' + laatste.items.length + ' gedaan';
+    } else sub = 'Nog geen rondje gelopen';
+    if (rondjeDue()) sub += ' — deze week staat het rondje nog open';
+    h = '<div class="card"><h2>Wekelijks rondje</h2>' +
+      '<div style="color:var(--muted);font-size:.83rem;margin-bottom:12px;">' + esc(sub) + '</div>' +
+      (items.length
+        ? '<div class="btn-row" style="margin-top:0;"><button class="btn primair" id="btnRondjeStart">▶ Rondje starten</button></div>'
+        : '<div style="color:var(--muted);font-size:.83rem;">Voeg hieronder de locaties toe die je elke week naloopt — een kastnummer (bijv. 11) of een Kardex-la (bijv. 21.10).</div>') +
+      '</div>';
+  }
+  $('rondjeStatus').innerHTML = h;
+  const bs = $('btnRondjeStart'); if (bs) bs.onclick = rondjeStart;
+  const ba = $('btnRondjeAfronden'); if (ba) ba.onclick = () => rondjeAfronden(false);
+  const bx = $('btnRondjeAnnuleer'); if (bx) bx.onclick = rondjeAnnuleer;
+
+  // routelijst
+  const div = $('rondjeLijst');
+  div.innerHTML = '';
+  for (const [id, item] of items) {
+    const c = act ? checkVan(act, id) : null;
+    const el = document.createElement('div');
+    el.className = 'item' + (c && c.w === 'skip' ? ' r-skip' : '');
+    let t2;
+    if (act) {
+      t2 = statusTekstCheck(c) + (c && c.opm ? ' · 💬 ' + c.opm : '');
+    } else {
+      const lc = laatsteControle(item.loc);
+      t2 = lc ? 'Laatst gecontroleerd: ' + fmtDatum.format(lc) : 'Nog niet eerder gecontroleerd';
+    }
+    el.innerHTML = (act
+      ? '<div class="status-ico' + (c && c.w !== 'skip' ? ' groen' : '') + '">' + (c ? (c.w === 'skip' ? '⏭' : '✓') : '○') + '</div>'
+      : '') +
+      '<div class="mid"><div class="t1">' + esc(item.loc) + (item.label ? ' — ' + esc(item.label) : '') + '</div>' +
+      '<div class="t2">' + esc(t2) + '</div></div>' +
+      '<div class="right">' + (act && c ? statusBadge(c.w, c.n) : '') + '</div>';
+    el.onclick = () => { if (rondje.actief) openCheckSheet(id); else openRouteSheet(id); };
+    div.appendChild(el);
+  }
+  if (!items.length) div.innerHTML = '<div class="leeg-melding">Nog geen locaties in de route.</div>';
+
+  // historie
+  const hist = rondje.historie.slice().reverse();
+  $('rondjeHistKaart').hidden = !hist.length;
+  const hDiv = $('rondjeHistorie');
+  hDiv.innerHTML = '';
+  for (const hs of hist) {
+    const gedaan = hs.items.filter(i => i.status === 'scan' || i.status === 'hand').length;
+    const skip = hs.items.filter(i => i.status === 'skip').length;
+    const open = hs.items.filter(i => i.status === 'open').length;
+    const el = document.createElement('div');
+    el.className = 'item';
+    el.innerHTML = '<div class="mid"><div class="t1">' + esc(fmtDatum.format(hs.afgerond)) + '</div>' +
+      '<div class="t2">' + gedaan + ' van ' + hs.items.length + ' gecontroleerd' +
+      (hs.scans ? ' · ' + hs.scans + ' scans' : '') + '</div></div>' +
+      '<div class="right">' +
+      (open ? '<span class="badge rood">' + open + ' niet gedaan</span> ' : '') +
+      (skip ? '<span class="badge geel">' + skip + ' overgeslagen</span>' : (open ? '' : '<span class="badge groen">✓ compleet</span>')) +
+      '</div>';
+    el.onclick = () => openHistSheet(hs);
+    hDiv.appendChild(el);
+  }
+}
+
+function updateRondjeUI() {
+  // navigatie-badge: openstaande locaties tijdens een rondje, of ! als het rondje deze week nog moet
+  const b = $('rondjeBadge');
+  if (rondje.actief) {
+    const open = routeItems().filter(([id]) => !checkVan(rondje.actief, id)).length;
+    b.hidden = !open;
+    b.textContent = open;
+  } else if (rondjeDue()) {
+    b.hidden = false;
+    b.textContent = '!';
+  } else b.hidden = true;
+
+  // hint op het scanscherm
+  const hint = $('rondjeHint');
+  if (rondje.actief) {
+    const items = routeItems();
+    const gedaan = items.filter(([id]) => { const c = checkVan(rondje.actief, id); return c && c.w !== 'skip'; }).length;
+    hint.textContent = '📍 Rondje bezig · ' + gedaan + ' van ' + items.length + ' — tik voor de lijst';
+    hint.hidden = false;
+  } else if (rondjeDue()) {
+    hint.textContent = '📍 Het wekelijkse rondje is deze week nog niet gelopen — tik om te starten';
+    hint.hidden = false;
+  } else hint.hidden = true;
+
+  // uitzonderingenlijst kan via sync gewijzigd zijn: veld en ⚠-teller verversen
+  const uitz = $('inpLocUitz');
+  if (uitz && document.activeElement !== uitz) {
+    uitz.value = ((rondje.locUitz && rondje.locUitz.lijst) || []).join('\n');
+  }
+  updateArtInfo();
+
+  if ($('view-rondje').classList.contains('active')) renderRondje();
+}
+
+// ---------- rondje sheets ----------
+function openRouteSheet(id) {
+  routeSheetId = id || null;
+  $('routeSheetTitel').textContent = id ? 'Locatie bewerken' : 'Locatie toevoegen';
+  $('inpRouteLoc').value = id ? rondje.route[id].loc : '';
+  $('inpRouteLabel').value = id ? (rondje.route[id].label || '') : '';
+  $('routeVolgRow').hidden = !id;
+  $('routeDelRow').hidden = !id;
+  let hh = '';
+  if (id) {
+    const loc = rondje.route[id].loc;
+    const regels = [];
+    for (let i = rondje.historie.length - 1; i >= 0 && regels.length < 6; i--) {
+      const it = (rondje.historie[i].items || []).find(x => x.loc === loc);
+      if (it) {
+        regels.push('<div class="item" style="cursor:default;"><div class="mid"><div class="t1">' +
+          esc(fmtDatum.format(rondje.historie[i].afgerond)) + '</div>' +
+          (it.opm ? '<div class="t2">💬 ' + esc(it.opm) + '</div>' : '') +
+          '</div><div class="right">' + statusBadge(it.status, it.n) + '</div></div>');
+      }
+    }
+    if (regels.length) {
+      hh = '<div style="font-size:.8rem;color:var(--muted);margin:8px 0 6px;">Eerdere controles</div>' + regels.join('');
+    }
+  }
+  $('routeHistBlok').innerHTML = hh;
+  $('routeOverlay').classList.add('open');
+}
+
+function bewaarRouteItem() {
+  const loc = $('inpRouteLoc').value.trim().replace(/\s+/g, '');
+  const label = $('inpRouteLabel').value.trim();
+  if (!locSegmenten(loc).length) { toast('Vul een locatie in, bijv. 11 of 21.10', true); return; }
+  if (routeSheetId) {
+    const item = rondje.route[routeSheetId];
+    item.loc = loc;
+    item.label = label;
+    item.ts = Date.now();
+  } else {
+    const volgMax = routeItems().reduce((m, x) => Math.max(m, x[1].volg || 0), 0);
+    const id = 'r' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    rondje.route[id] = { loc, label, volg: volgMax + 1, ts: Date.now() };
+  }
+  bewaarRondje();
+  planRondjeSync();
+  $('routeOverlay').classList.remove('open');
+  renderRondje();
+  updateRondjeUI();
+  toast('✓ ' + loc + (label ? ' — ' + label : '') + ' opgeslagen');
+}
+
+function verwijderRouteItem() {
+  if (!routeSheetId) return;
+  const item = rondje.route[routeSheetId];
+  if (!confirm((item.label || item.loc) + ' uit de route verwijderen?')) return;
+  // tombstone i.p.v. echt wissen, anders komt het item bij de volgende sync terug
+  rondje.route[routeSheetId] = { loc: item.loc, ts: Date.now(), del: true };
+  bewaarRondje();
+  planRondjeSync();
+  $('routeOverlay').classList.remove('open');
+  renderRondje();
+  updateRondjeUI();
+  toast('🗑 ' + item.loc + ' uit de route verwijderd');
+}
+
+function verschuifRoute(richting) {
+  const lijst = routeItems();
+  lijst.forEach((x, i) => { x[1].volg = i + 1; });
+  const i = lijst.findIndex(x => x[0] === routeSheetId);
+  const j = i + richting;
+  if (i < 0 || j < 0 || j >= lijst.length) return;
+  lijst[i][1].volg = j + 1;
+  lijst[j][1].volg = i + 1;
+  lijst[i][1].ts = Date.now();
+  lijst[j][1].ts = Date.now();
+  bewaarRondje();
+  planRondjeSync();
+  renderRondje();
+  toast(richting < 0 ? '↑ Eerder in de route gezet' : '↓ Later in de route gezet');
+}
+
+function openCheckSheet(id) {
+  const item = rondje.route[id];
+  const act = rondje.actief;
+  if (!item || item.del || !act) return;
+  checkSheetId = id;
+  const c = checkVan(act, id);
+  $('checkTitel').textContent = item.loc + (item.label ? ' — ' + item.label : '');
+  $('checkStatus').textContent = statusTekstCheck(c);
+  $('inpCheckOpm').value = c && c.opm ? c.opm : '';
+  $('btnCheckReset').hidden = !c;
+  $('checkOverlay').classList.add('open');
+}
+
+function zetCheck(w) {
+  const act = rondje.actief;
+  if (!act || !checkSheetId) return;
+  const item = rondje.route[checkSheetId];
+  const c = checkVan(act, checkSheetId);
+  act.checks[checkSheetId] = {
+    ts: Date.now(),
+    // een al-gescande locatie blijft "scan" (dat is het sterkere bewijs)
+    w: (w === 'hand' && c && c.w === 'scan') ? 'scan' : w,
+    n: c ? (c.n || 0) : 0,
+    opm: $('inpCheckOpm').value.trim()
+  };
+  bewaarRondje();
+  planRondjeSync();
+  $('checkOverlay').classList.remove('open');
+  renderRondje();
+  updateRondjeUI();
+  toast(w === 'skip' ? '⏭ ' + item.loc + ' deze ronde overgeslagen' : '✓ ' + item.loc + ' afgevinkt');
+  if (w !== 'skip') controleerAutoAfronden();
+}
+
+function resetCheck() {
+  const act = rondje.actief;
+  if (!act || !checkSheetId) return;
+  // tombstone i.p.v. echt wissen, anders komt het vinkje bij de volgende sync terug
+  act.checks[checkSheetId] = { ts: Date.now(), w: 'reset' };
+  bewaarRondje();
+  planRondjeSync();
+  $('checkOverlay').classList.remove('open');
+  renderRondje();
+  updateRondjeUI();
+  toast('Vinkje weggehaald');
+}
+
+function sluitCheckSheet() {
+  const act = rondje.actief;
+  if (act && checkSheetId) {
+    const c = checkVan(act, checkSheetId);
+    const opm = $('inpCheckOpm').value.trim();
+    if (c && (c.opm || '') !== opm) {
+      c.opm = opm;
+      c.ts = Date.now();
+      bewaarRondje();
+      planRondjeSync();
+      renderRondje();
+    }
+  }
+  $('checkOverlay').classList.remove('open');
+}
+
+// ---------- rondje historie-detail & rapport ----------
+function openHistSheet(hs) {
+  $('histTitel').textContent = 'Rondje ' + fmtDatum.format(hs.afgerond);
+  const gedaan = hs.items.filter(i => i.status === 'scan' || i.status === 'hand').length;
+  let h = '<div style="color:var(--muted);font-size:.83rem;margin-bottom:10px;">' +
+    gedaan + ' van ' + hs.items.length + ' gecontroleerd · ' +
+    esc(fmtTijd.format(hs.gestart)) + ' – ' + esc(fmtTijd.format(hs.afgerond)) + '</div>';
+  for (const it of hs.items) {
+    h += '<div class="item" style="cursor:default;"><div class="mid"><div class="t1">' +
+      esc(it.loc) + (it.label ? ' — ' + esc(it.label) : '') + '</div>' +
+      (it.opm ? '<div class="t2">💬 ' + esc(it.opm) + '</div>' : '') +
+      '</div><div class="right">' + statusBadge(it.status, it.n) + '</div></div>';
+  }
+  h += '<div id="histScans">' + (hs.scans ? '<div class="leeg-melding" style="padding:14px;">Scans laden…</div>' : '') + '</div>';
+  $('histInhoud').innerHTML = h;
+  histCsvData = null;
+  $('btnHistCsv').hidden = true;
+  $('histOverlay').classList.add('open');
+  if (hs.scans) laadHistScans(hs);
+  else {
+    histCsvData = { id: hs.id, gestart: hs.gestart, afgerond: hs.afgerond, items: hs.items, scans: [] };
+    $('btnHistCsv').hidden = false;
+  }
+}
+
+async function laadHistScans(hs) {
+  // het volledige rapport: eerst lokaal (nog niet gearchiveerd), anders uit het archief
+  let vol = rondje.archiefWacht.find(x => x.id === hs.id) || null;
+  if (!vol) {
+    try {
+      const raw = await ghGetRaw('archief/rondje-' + hs.id + '.json');
+      if (raw) vol = JSON.parse(raw);
+    } catch (e) { /* offline of niet gevonden */ }
+  }
+  const div = $('histScans');
+  if (!div || !$('histOverlay').classList.contains('open')) return;
+  if (!vol) {
+    div.innerHTML = '<div class="leeg-melding" style="padding:14px;">Scans niet beschikbaar (offline?)</div>';
+    return;
+  }
+  let h = '<div style="font-size:.8rem;color:var(--muted);margin:10px 0 6px;">Geregistreerd tijdens dit rondje · ' + vol.scans.length + '</div>';
+  for (const s of vol.scans) {
+    const badges = (s.g != null ? '<span class="badge groen">✓ ' + s.g + '</span> ' : '') +
+      (s.best ? '<span class="badge geel">bestel ' + s.best + '</span>' : '');
+    h += '<div class="item" style="cursor:default;"><div class="mid"><div class="t1">' + esc(s.o || s.b) + '</div>' +
+      '<div class="t2">' + esc(s.a || s.b) + ' · ' + locHtml(s.l) +
+      (s.opm ? ' · 💬 ' + esc(s.opm) : '') + '</div></div><div class="right">' + badges + '</div></div>';
+  }
+  div.innerHTML = h;
+  histCsvData = vol;
+  $('btnHistCsv').hidden = false;
+}
+
+function downloadRondjeCsv(vol) {
+  const cel = (v) => {
+    v = String(v == null ? '' : v);
+    return /[;"\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+  };
+  const st = { scan: 'gecontroleerd (scan)', hand: 'gecontroleerd (handmatig)', skip: 'overgeslagen', open: 'niet gedaan' };
+  const regels = ['Locatie;Label;Status;Tijd;Scans;Opmerking'];
+  for (const it of vol.items) {
+    regels.push([it.loc, it.label || '', st[it.status] || it.status,
+      it.ts ? fmtTijd.format(it.ts) : '', it.n || '', it.opm || ''].map(cel).join(';'));
+  }
+  if ((vol.scans || []).length) {
+    regels.push('');
+    regels.push('Tijd;Barcode;Artikelnummer;Omschrijving;Locatie;Locatienotatie;Geteld;Bestellen;Besteld;Opmerking');
+    for (const s of vol.scans) {
+      regels.push([fmtTijd.format(s.ts), s.b, s.a, s.o, s.l,
+        s.l && !locNotatieOk(s.l) ? 'afwijkend' : '',
+        s.g != null ? s.g : '', s.best != null ? s.best : '', s.bsd ? 'ja' : '', s.opm || ''].map(cel).join(';'));
+    }
+  }
+  const blob = new Blob(['﻿' + regels.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'Rondje ' + new Date(vol.afgerond).toISOString().slice(0, 10) + '.csv';
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
 // ---------- UI ----------
 function toonView(naam) {
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
@@ -1010,6 +1691,7 @@ function toonView(naam) {
     b.classList.toggle('active', b.dataset.view === naam));
   if (naam === 'overzicht') renderOverzicht();
   if (naam === 'lijst') renderLijst();
+  if (naam === 'rondje') renderRondje();
 }
 
 // niet renderen terwijl er in een overzicht-veldje getypt wordt (sync zou de
@@ -1076,13 +1758,42 @@ function bindEvents() {
   $('btnVorig').addEventListener('click', () => blader(-1));
   $('btnVolgend').addEventListener('click', () => blader(1));
 
-  $('btnSyncNu').addEventListener('click', () => { syncTelling(); });
+  $('btnSyncNu').addEventListener('click', () => { syncTelling(); syncRondje(); });
   $('btnCsv').addEventListener('click', downloadCsv);
   $('btnAllesTonen').addEventListener('click', () => { ovFilter = null; renderOverzicht(); });
   $('btnAfronden').addEventListener('click', rondAf);
   $('btnArtVerversen').addEventListener('click', () => verversArtikelen(false));
+  $('btnLocFouten').addEventListener('click', downloadLocFouten);
+  $('btnLocUitzOpslaan').addEventListener('click', () => {
+    const lijst = Array.from(new Set($('inpLocUitz').value.split('\n').map(s => s.trim()).filter(Boolean)));
+    rondje.locUitz = { ts: Date.now(), lijst };
+    bewaarRondje();
+    planRondjeSync();
+    updateArtInfo();
+    renderAlles();
+    toast('✓ ' + lijst.length + ' uitzondering(en) opgeslagen');
+  });
 
   $('setupBanner').addEventListener('click', () => toonView('instellingen'));
+
+  // rondje
+  $('rondjeHint').addEventListener('click', () => toonView('rondje'));
+  $('btnRouteToevoegen').addEventListener('click', () => openRouteSheet(null));
+  $('btnRouteOpslaan').addEventListener('click', bewaarRouteItem);
+  $('btnRouteSluit').addEventListener('click', () => $('routeOverlay').classList.remove('open'));
+  $('btnRouteDel').addEventListener('click', verwijderRouteItem);
+  $('btnRouteOmhoog').addEventListener('click', () => verschuifRoute(-1));
+  $('btnRouteOmlaag').addEventListener('click', () => verschuifRoute(1));
+  $('btnCheckKlopt').addEventListener('click', () => zetCheck('hand'));
+  $('btnCheckSkip').addEventListener('click', () => zetCheck('skip'));
+  $('btnCheckReset').addEventListener('click', resetCheck);
+  $('btnCheckSluit').addEventListener('click', sluitCheckSheet);
+  $('btnHistSluit').addEventListener('click', () => $('histOverlay').classList.remove('open'));
+  $('btnHistCsv').addEventListener('click', () => { if (histCsvData) downloadRondjeCsv(histCsvData); });
+  $('selRondjeDag').addEventListener('change', () => {
+    localStorage.setItem('mgz_rondjedag', $('selRondjeDag').value);
+    updateRondjeUI();
+  });
 
   $('btnTokenOpslaan').addEventListener('click', async () => {
     const t = $('inpToken').value.trim();
@@ -1091,7 +1802,7 @@ function bindEvents() {
     toonSetupBanner();
     toast('Token opgeslagen — verbinding testen…');
     const ok = await verversArtikelen(true);
-    if (ok) { toast('✓ Verbonden met de data-repo'); syncTelling(); }
+    if (ok) { toast('✓ Verbonden met de data-repo'); syncTelling(); syncRondje(); }
     else toast('Verbinden mislukt — controleer het token', true);
   });
 
@@ -1108,9 +1819,13 @@ function bindEvents() {
   });
 
   window.addEventListener('resize', zetAppHoogte);
-  window.addEventListener('online', () => { if (syncNodig) syncTelling(); });
+  window.addEventListener('online', () => {
+    if (syncNodig) syncTelling();
+    if (rondjeSyncNodig) syncRondje();
+  });
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible' && syncNodig) syncTelling();
+    if (document.visibilityState === 'visible' && rondjeSyncNodig) syncRondje();
     if (document.visibilityState === 'hidden') stopScanner();
   });
 }
@@ -1163,16 +1878,19 @@ function registreerSw() {
 function init() {
   zetAppHoogte();
   laadLokaal();
+  laadRondjeLokaal();
   bindEvents();
   $('versieInfo').textContent = 'Magazijn Scanner v' + VERSIE + ' · data: ' + DATA_REPO;
   $('inpToken').value = getToken();
   $('swDoorscannen').checked = localStorage.getItem('mgz_doorscannen') !== '0';
   $('slScanPos').value = localStorage.getItem('mgz_scanpos') || '100';
   $('swKnopBoven').checked = localStorage.getItem('mgz_knopboven') === '1';
+  $('selRondjeDag').value = localStorage.getItem('mgz_rondjedag') || '';
   pasScanIndelingToe();
   toonSetupBanner();
   updateArtInfo();
   renderLijst();
+  updateRondjeUI();
 
   // op een pc met groot scherm direct het overzicht tonen
   if (window.matchMedia('(pointer: fine)').matches && window.innerWidth > 900 && Object.values(telling.items).some(it => !it.del)) {
@@ -1182,6 +1900,7 @@ function init() {
   if (getToken() && navigator.onLine) {
     verversArtikelen(true);
     syncTelling();
+    syncRondje();
   } else if (!navigator.onLine) {
     zetStatus('err', 'Offline');
   } else {

@@ -684,6 +684,54 @@ input.masked { -webkit-text-security: disc; }
 .switch input:checked + .track { background: var(--green-dim); }
 .switch input:checked + .track::after { left: 25px; background: var(--green); }
 
+/* ---------- Rondje ---------- */
+.rondje-hint {
+  flex: none;
+  background: var(--green-dim);
+  border: 1px solid var(--green);
+  color: var(--green);
+  border-radius: var(--radius-s);
+  padding: 10px 14px;
+  font-size: 0.85rem;
+  margin-bottom: 10px;
+  cursor: pointer;
+}
+.rondje-balk {
+  height: 6px;
+  background: var(--surface-3);
+  border-radius: 999px;
+  overflow: hidden;
+  margin-top: 10px;
+}
+.rondje-balk > div {
+  height: 100%;
+  background: var(--green-strong);
+  border-radius: 999px;
+  transition: width 0.2s ease;
+}
+.item .status-ico {
+  flex: none;
+  width: 24px;
+  text-align: center;
+  font-size: 1.05rem;
+  color: var(--muted);
+}
+.item .status-ico.groen { color: var(--green); }
+.item.r-skip { opacity: 0.55; }
+/* ⚠ achter een locatie: afwijkende notatie (typfout in het bronsysteem) */
+.loc-fout { color: var(--yellow); cursor: help; }
+.set-row select {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-s);
+  color: var(--text);
+  padding: 12px 14px;
+  font-size: 0.95rem;
+  outline: none;
+  font-family: inherit;
+}
+
 /* ---------- Navigatie ---------- */
 nav {
   position: fixed;

@@ -43,7 +43,7 @@ Het token wordt alleen lokaal op het apparaat bewaard.
 - Maak een bladwijzer naar de app-URL (voor het overzicht van telverschillen en bestellingen).
 - **Artikellijst bijwerken:** dubbelklik de snelkoppeling **"Artikellijst bijwerken"** op het
   bureaublad. Die leest `Export Artikelen.xlsx` (of `.csv`) uit
-  `C:\Users\td\Projecten_AI\Magazijn scanner\Bron` en zet de nieuwe artikellijst in de cloud.
+  `C:\Users\td\Projecten_AI\MagazijnScanner\Bron` en zet de nieuwe artikellijst in de cloud.
   De app haalt de lijst automatisch op bij de volgende start.
 - In diezelfde map hoort **`Crediteuren.xlsx`** (kolommen `Cred.nr` en `Naam`). Het script zet
   daarmee de crediteurcode uit de export om naar de volledige naam, zodat het overzicht
@@ -57,3 +57,32 @@ Het token wordt alleen lokaal op het apparaat bewaard.
 - **Overzicht** (PC) → telverschillen en bestellingen per crediteur.
 - **Telling afronden & leegmaken** (Instellingen) → archiveert de telling in de cloud en
   begint met een schone lijst. Alleen doen als de hele telronde klaar is.
+- **⚠ achter een locatie** → de locatie staat niet in de standaardnotatie
+  `kast.plank.breedte` (eventueel met `-diepte`, bijv. `21.10.5-4` of `54.3.5-b`).
+  De app snapt zo'n locatie gewoon, maar het is een typfout in het bronsysteem.
+  Bij *Instellingen → Artikellijst* staat hoeveel het er zijn en download je de
+  lijst (CSV) om ze stap voor stap recht te zetten. Bewust gekozen vrije locaties
+  (ZOLDER, WPK, Oliehok, …) zet je daar op de uitzonderingenlijst — die tellen
+  als goed en krijgen geen ⚠.
+
+## Wekelijks rondje
+
+- **Rondje** (tabblad) → de vaste controleroute door het magazijn.
+- **Route instellen:** tik *＋ Locatie toevoegen* en vul een locatie in — een heel
+  kastnummer (bijv. `11`) of één Kardex-la (bijv. `21.10`) — met optioneel een label
+  ("koffer boortjes"). De volgorde van de lijst is je loopvolgorde (aan te passen via
+  *Locatie bewerken*).
+- **Rondje lopen:** tik *▶ Rondje starten* en werk daarna gewoon zoals altijd. Elke
+  scan die je opslaat (geteld / klopt / besteld / opmerking) vinkt de bijbehorende
+  route-locatie automatisch af. Een locatie waar alles klopt zonder scan? Tik hem aan
+  en kies *✓ Gecontroleerd — klopt* (of scan één artikel en tik *Voorraad klopt*).
+  Overslaan kan ook; dat wordt dan zo vastgelegd.
+- **Afronden:** zodra alles is afgevinkt rondt het rondje zichzelf af. Met open of
+  overgeslagen locaties gebruik je de knop *Rondje afronden*. Het volledige rapport
+  (locaties + alle scans van dat rondje) wordt bewaard in de cloud
+  (`archief/rondje-….json`).
+- **Historie:** op het Rondje-tabblad zie je alle eerdere rondes (tik voor het rapport
+  en CSV-download) en per locatie wanneer die voor het laatst gecontroleerd is.
+- **Vaste rondjesdag:** instellen bij *Instellingen → Wekelijks rondje*. Vanaf die dag
+  verschijnt op het scanscherm een seintje zolang het rondje die week nog niet is
+  gelopen. Op een andere dag lopen mag gewoon — het telt voor die week.
