@@ -4,7 +4,7 @@
  */
 'use strict';
 
-const VERSIE = '1.10.1';
+const VERSIE = '1.10.2';
 const DATA_REPO = 'VanSchieBV/magazijn-data';
 const API_BASE = 'https://api.github.com/repos/' + DATA_REPO + '/contents/';
 
@@ -1049,7 +1049,8 @@ async function syncTellingDirect() {
 }
 
 // ---------- wekelijks rondje ----------
-// route:   {id: {loc,label,volg,ts,del?}} — de vaste controleroute (gesynct via rondje.json)
+// route:   {id: {loc,label,ts,del?}} — de vaste controleroute (gesynct via rondje.json),
+//          altijd gesorteerd op locatie (natuurlijk oplopend)
 // actief:  null | {gestart, checks:{id:{ts,w,n,opm}}, scans:{barcode:{…}}}
 //          w: 'scan' (automatisch via een scan), 'hand' (handmatig afgevinkt),
 //             'skip' (deze ronde overgeslagen), 'reset' (tombstone: vinkje weggehaald)
@@ -1096,9 +1097,9 @@ function locValtBinnen(routeLoc, artLoc) {
 }
 
 function routeItems() {
+  // natuurlijk oplopend op locatie: 2.4 vóór 11, 21.2 vóór 21.10, letters alfabetisch
   return Object.entries(rondje.route).filter(x => !x[1].del)
-    .sort((a, b) => (a[1].volg || 0) - (b[1].volg || 0) ||
-      String(a[1].loc).localeCompare(String(b[1].loc), undefined, { numeric: true }));
+    .sort((a, b) => String(a[1].loc).localeCompare(String(b[1].loc), undefined, { numeric: true, sensitivity: 'base' }));
 }
 // een check met w:'reset' is een tombstone (vinkje weggehaald) en telt als "geen check"
 function checkVan(act, id) {
@@ -1464,7 +1465,6 @@ function openRouteSheet(id) {
   $('routeSheetTitel').textContent = id ? 'Locatie bewerken' : 'Locatie toevoegen';
   $('inpRouteLoc').value = id ? rondje.route[id].loc : '';
   $('inpRouteLabel').value = id ? (rondje.route[id].label || '') : '';
-  $('routeVolgRow').hidden = !id;
   $('routeDelRow').hidden = !id;
   let hh = '';
   if (id) {
@@ -1497,9 +1497,8 @@ function bewaarRouteItem() {
     item.label = label;
     item.ts = Date.now();
   } else {
-    const volgMax = routeItems().reduce((m, x) => Math.max(m, x[1].volg || 0), 0);
     const id = 'r' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-    rondje.route[id] = { loc, label, volg: volgMax + 1, ts: Date.now() };
+    rondje.route[id] = { loc, label, ts: Date.now() };
   }
   bewaarRondje();
   planRondjeSync();
@@ -1521,22 +1520,6 @@ function verwijderRouteItem() {
   renderRondje();
   updateRondjeUI();
   toast('🗑 ' + item.loc + ' uit de route verwijderd');
-}
-
-function verschuifRoute(richting) {
-  const lijst = routeItems();
-  lijst.forEach((x, i) => { x[1].volg = i + 1; });
-  const i = lijst.findIndex(x => x[0] === routeSheetId);
-  const j = i + richting;
-  if (i < 0 || j < 0 || j >= lijst.length) return;
-  lijst[i][1].volg = j + 1;
-  lijst[j][1].volg = i + 1;
-  lijst[i][1].ts = Date.now();
-  lijst[j][1].ts = Date.now();
-  bewaarRondje();
-  planRondjeSync();
-  renderRondje();
-  toast(richting < 0 ? '↑ Eerder in de route gezet' : '↓ Later in de route gezet');
 }
 
 function openCheckSheet(id) {
@@ -1782,8 +1765,6 @@ function bindEvents() {
   $('btnRouteOpslaan').addEventListener('click', bewaarRouteItem);
   $('btnRouteSluit').addEventListener('click', () => $('routeOverlay').classList.remove('open'));
   $('btnRouteDel').addEventListener('click', verwijderRouteItem);
-  $('btnRouteOmhoog').addEventListener('click', () => verschuifRoute(-1));
-  $('btnRouteOmlaag').addEventListener('click', () => verschuifRoute(1));
   $('btnCheckKlopt').addEventListener('click', () => zetCheck('hand'));
   $('btnCheckSkip').addEventListener('click', () => zetCheck('skip'));
   $('btnCheckReset').addEventListener('click', resetCheck);

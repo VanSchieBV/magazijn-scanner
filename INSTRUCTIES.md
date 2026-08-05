@@ -70,8 +70,8 @@ Het token wordt alleen lokaal op het apparaat bewaard.
 - **Rondje** (tabblad) → de vaste controleroute door het magazijn.
 - **Route instellen:** tik *＋ Locatie toevoegen* en vul een locatie in — een heel
   kastnummer (bijv. `11`) of één Kardex-la (bijv. `21.10`) — met optioneel een label
-  ("koffer boortjes"). De volgorde van de lijst is je loopvolgorde (aan te passen via
-  *Locatie bewerken*).
+  ("koffer boortjes"). De lijst sorteert zichzelf op locatie (oplopend), ook als je
+  later iets toevoegt.
 - **Rondje lopen:** tik *▶ Rondje starten* en werk daarna gewoon zoals altijd. Elke
   scan die je opslaat (geteld / klopt / besteld / opmerking) vinkt de bijbehorende
   route-locatie automatisch af. Een locatie waar alles klopt zonder scan? Tik hem aan
