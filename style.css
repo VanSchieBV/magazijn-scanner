@@ -110,10 +110,14 @@ main {
 #scanCluster .search-results { order: 2; }
 #scanCluster .search-row { order: 3; }
 #scanCluster .scan-hero { order: 4; }
+#scanCluster .handscanner-row { order: 5; }
 /* omgekeerde volgorde: scanknop boven, zoekbalk (met resultaten erboven) onder */
 #scanIdle.knop-boven #scanCluster .scan-hero { order: 2; padding: 4px 0 16px; }
 #scanIdle.knop-boven #scanCluster .search-results { order: 3; }
 #scanIdle.knop-boven #scanCluster .search-row { order: 4; }
+/* handscanner-modus: camera-scanknop is overbodig op dit toestel */
+#scanIdle.handscanner .scan-hero { display: none; }
+.handscanner-row { padding: 12px 4px 0; }
 @keyframes fadein { from { opacity: 0.4; } to { opacity: 1; } }
 
 /* ---------- Kaarten ---------- */

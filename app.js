@@ -4,7 +4,7 @@
  */
 'use strict';
 
-const VERSIE = '1.12.1';
+const VERSIE = '1.13.0';
 const DATA_REPO = 'VanSchieBV/magazijn-data';
 const API_BASE = 'https://api.github.com/repos/' + DATA_REPO + '/contents/';
 
@@ -427,6 +427,54 @@ function verwerkScan(code) {
   zoekEnOpen(String(code).trim());
 }
 
+// ---------- handscanner (laserscanner die als toetsenbord typt) ----------
+// de handscanner voert een code in als losse toetsaanslagen, zonder Enter en
+// zonder een veld te kiezen. We vangen die aanslagen wereldwijd af (dus zonder
+// de zoekbalk te focussen — geen schermtoetsenbord), tonen ze in de zoekbalk en
+// zoeken vanzelf zodra de scanner klaar is (korte pauze of een Enter).
+let hsBuffer = '';
+let hsTimer = null;
+
+function handscannerAan() { return localStorage.getItem('mgz_handscanner') === '1'; }
+
+function pasHandscannerToe() {
+  const aan = handscannerAan();
+  $('swHandscanner').checked = aan;
+  $('scanIdle').classList.toggle('handscanner', aan);
+  document.querySelector('.scan-hint').textContent = aan
+    ? 'Scan een code met de handscanner — het artikel opent vanzelf'
+    : 'Richt op de code van het vak en druk op de scanknop';
+}
+
+function hsVerwerk() {
+  const code = hsBuffer.trim();
+  hsBuffer = '';
+  clearTimeout(hsTimer);
+  if (!code) return;
+  $('zoekInput').value = '';
+  piep();
+  zoekEnOpen(code);
+}
+
+function hsKeydown(e) {
+  if (!handscannerAan()) return;
+  if (e.ctrlKey || e.altKey || e.metaKey) return;
+  // typt de gebruiker zelf ergens in een veld, dan blijven we eraf
+  const a = document.activeElement;
+  if (a && a.matches && a.matches('input, textarea, select')) return;
+  if (document.querySelector('.overlay.open') || camActief) return;
+  if (e.key === 'Enter') {
+    if (hsBuffer) { e.preventDefault(); hsVerwerk(); }
+    return;
+  }
+  if (e.key.length !== 1) return;
+  e.preventDefault();
+  hsBuffer += e.key;
+  $('zoekInput').value = hsBuffer;
+  clearTimeout(hsTimer);
+  hsTimer = setTimeout(hsVerwerk, 300);
+}
+
 // ---------- artikel zoeken & paneel ----------
 function zoekEnOpen(code) {
   let treffers = artIndex.get(code) || [];
@@ -713,7 +761,8 @@ function slaOp(kloptDirect) {
   toast(kloptDirect ? ('✓ ' + naam + ' klopt (' + entry.g + ')' + extra) : ('✓ ' + naam + ' opgeslagen' + extra));
   sluitPaneel();
   renderAlles();
-  if ($('swDoorscannen').checked) startScanner();
+  // met de handscanner is de camera niet nodig: gewoon direct weer scannen
+  if ($('swDoorscannen').checked && !handscannerAan()) startScanner();
 }
 
 // ---------- handmatig zoeken ----------
@@ -1885,7 +1934,7 @@ function bindEvents() {
   $('btnOpslaan').addEventListener('click', () => slaOp(false));
   $('btnKlopt').addEventListener('click', () => slaOp(true));
   $('btnAnnuleer').addEventListener('click', sluitPaneel);
-  $('btnTerugScan').addEventListener('click', () => { sluitPaneel(); startScanner(); });
+  $('btnTerugScan').addEventListener('click', () => { sluitPaneel(); if (!handscannerAan()) startScanner(); });
   $('btnVerwijder').addEventListener('click', verwijderRegistratie);
   $('btnBesteld').addEventListener('click', wisselBesteld);
   $('btnUitloop').addEventListener('click', wisselUitloop);
@@ -1942,6 +1991,16 @@ function bindEvents() {
 
   $('swDoorscannen').addEventListener('change', () =>
     localStorage.setItem('mgz_doorscannen', $('swDoorscannen').checked ? '1' : '0'));
+
+  // handscanner-modus: aanslagen wereldwijd opvangen; schuifje blijft per toestel bewaard
+  document.addEventListener('keydown', hsKeydown);
+  $('swHandscanner').addEventListener('change', () => {
+    localStorage.setItem('mgz_handscanner', $('swHandscanner').checked ? '1' : '0');
+    pasHandscannerToe();
+    toast($('swHandscanner').checked
+      ? '🔫 Handscanner aan — scan een code, het artikel opent vanzelf'
+      : 'Handscanner uit — camera-scanknop is terug');
+  });
 
   $('slScanPos').addEventListener('input', () => {
     localStorage.setItem('mgz_scanpos', $('slScanPos').value);
@@ -2051,6 +2110,7 @@ function init() {
   $('swKnopBoven').checked = localStorage.getItem('mgz_knopboven') === '1';
   $('selRondjeDag').value = localStorage.getItem('mgz_rondjedag') || '';
   pasScanIndelingToe();
+  pasHandscannerToe();
   toonSetupBanner();
   updateArtInfo();
   renderLijst();

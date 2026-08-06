@@ -53,6 +53,10 @@ Het token wordt alleen lokaal op het apparaat bewaard.
 ## Dagelijks gebruik
 
 - **Scannen** → barcode/QR richten → aantal geteld / bestellen / opmerking invullen → opslaan.
+- **Handscanner** (schuifje op het scanscherm) → voor een toestel met ingebouwde
+  laserscanner. De camera-scanknop verdwijnt; scan een code en het artikel opent
+  vanzelf, zonder dat het toetsenbord omhoog komt. Het schuifje blijft op dat
+  toestel aan staan.
 - **Geteld** → lijst van wat deze ronde al geteld is.
 - **Overzicht** (PC) → telverschillen en bestellingen per crediteur.
 - **Telling afronden & leegmaken** (Instellingen) → archiveert de telling in de cloud en
