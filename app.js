@@ -4,7 +4,7 @@
  */
 'use strict';
 
-const VERSIE = '1.11.2';
+const VERSIE = '1.12.0';
 const DATA_REPO = 'VanSchieBV/magazijn-data';
 const API_BASE = 'https://api.github.com/repos/' + DATA_REPO + '/contents/';
 
@@ -483,6 +483,7 @@ function openPaneel(art, behoudBlader) {
   $('btnKlopt').hidden = false;
   $('scanIdle').hidden = true;
   $('artPanel').hidden = false;
+  updateUitloopUI();
   if (!behoudBlader) bouwBlader();
   updateBladerUI();
   updateBesteldKnop();
@@ -508,6 +509,7 @@ function openPaneelOnbekend(code, behoudBlader) {
   $('btnKlopt').hidden = true;
   $('scanIdle').hidden = true;
   $('artPanel').hidden = false;
+  updateUitloopUI();
   if (!behoudBlader) bouwBlader();
   updateBladerUI();
   updateBesteldKnop();
@@ -597,6 +599,32 @@ function wisselBesteld() {
     (rondjeNieuw.length ? ' · 📍 ' + rondjeNieuw.join(', ') + ' ✓' : ''));
   if (bladerIdx >= 0 && bladerIdx < bladerKeys.length - 1) blader(1);
   else { updateBladerUI(); updateBesteldKnop(); }
+}
+
+// ---------- uitlooplijst ----------
+// artikelen die niet meer gebruikt worden: bij het scannen verschijnt een
+// melding, en de hele lijst staat onderaan het Overzicht
+function updateUitloopUI() {
+  const op = huidigeKey ? !!uitloopVan(huidigeKey) : false;
+  $('uitloopBanner').hidden = !op;
+  $('btnUitloop').textContent = op ? '📉 Van de uitlooplijst halen' : '📉 Markeer als uitloop';
+}
+
+function wisselUitloop() {
+  if (!huidigArt) return;
+  const b = huidigArt.b;
+  if (uitloopVan(b)) {
+    // tombstone i.p.v. echt wissen, anders komt het artikel bij de volgende sync terug
+    rondje.uitloop[b] = { ts: Date.now(), del: true };
+    toast((huidigArt.a || b) + ' van de uitlooplijst gehaald');
+  } else {
+    rondje.uitloop[b] = { a: huidigArt.a || '', o: huidigArt.o || '', l: huidigArt.l || '', ts: Date.now() };
+    toast('📉 ' + (huidigArt.a || b) + ' op de uitlooplijst gezet');
+  }
+  bewaarRondje();
+  planRondjeSync();
+  updateUitloopUI();
+  renderAlles();
 }
 
 // ---------- geselecteerd telveld (− en + werken op dit veld) ----------
@@ -732,6 +760,7 @@ function maakLijstItem(it) {
   else if (it.g != null) badgeHtml = '<span class="badge groen">✓ ' + it.g + '</span>';
   if (it.bsd) badgeHtml += ' <span class="badge groen">🛒 besteld' + (it.best > 0 ? ' ' + it.best : '') + '</span>';
   else if (it.best != null && it.best > 0) badgeHtml += ' <span class="badge geel">bestel ' + it.best + '</span>';
+  if (uitloopVan(it.b)) badgeHtml = '<span class="badge rood">📉 uitloop</span> ' + badgeHtml;
   const el = document.createElement('div');
   el.className = 'item' + (it.kl ? ' klaar' : '');
   el.innerHTML = '<input type="checkbox" class="lijst-klaar" aria-label="Klaar"' + (it.kl ? ' checked' : '') + '>' +
@@ -1015,12 +1044,32 @@ function renderOverzicht() {
     $('ovOpmerkingen').innerHTML = h + '</table>';
     koppelOverzichtRijen($('ovOpmerkingen'));
   }
+
+  // uitloop — artikelen die niet meer gebruikt worden en gaan verdwijnen
+  const uitloopItems = Object.entries(rondje.uitloop || {}).filter(x => !x[1].del)
+    .sort((a, b) => String(a[1].l || '').localeCompare(String(b[1].l || ''), undefined, { numeric: true }));
+  $('kaartUitloop').hidden = !uitloopItems.length || ovFilter !== null;
+  if (uitloopItems.length) {
+    let h = '<table><tr><th>Artikel</th><th>Locatie</th><th>Op de lijst sinds</th></tr>';
+    for (const [b, u] of uitloopItems) {
+      h += '<tr data-b="' + esc(b) + '"><td><b>' + esc(u.a || b) + '</b><br><span style="color:var(--muted)">' + esc(u.o || '') + '</span></td>' +
+        '<td>' + locHtml(u.l) + '</td><td>' + esc(fmtDatum.format(u.ts)) + '</td></tr>';
+    }
+    $('ovUitloop').innerHTML = h + '</table>';
+    $('ovUitloop').querySelectorAll('tr[data-b]').forEach(r => {
+      r.onclick = () => {
+        const b = r.getAttribute('data-b');
+        const art = (artIndex.get(b) || [])[0];
+        if (art) openPaneel(art); else openPaneelOnbekend(b);
+      };
+    });
+  }
 }
 
 function downloadCsv() {
   const items = Object.values(telling.items).filter(it => !it.del).sort((a, b) => (a.l || '').localeCompare(b.l || ''));
   if (!items.length) { toast('Nog niets geteld', true); return; }
-  const kol = ['Barcode','Artikelnummer','Korte omschrijving','Fabrikantcode','Hun nummer','Locatie','Locatienotatie','Tech. Voorraad','Geteld','Crediteur','Bestellen','Besteld','Inkoopnummer','Opmerking'];
+  const kol = ['Barcode','Artikelnummer','Korte omschrijving','Fabrikantcode','Hun nummer','Locatie','Locatienotatie','Tech. Voorraad','Geteld','Crediteur','Bestellen','Besteld','Inkoopnummer','Uitloop','Opmerking'];
   const cel = (v) => {
     v = String(v == null ? '' : v);
     return /[;"\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
@@ -1030,7 +1079,7 @@ function downloadCsv() {
     regels.push([it.b, it.a, it.o, it.f, it.h, it.l,
       it.l && !locNotatieOk(it.l) ? 'afwijkend' : '', it.v,
       it.g != null ? it.g : '', credVan(it), it.best != null ? it.best : '',
-      it.bsd ? 'ja' : '', it.ink || '', it.opm].map(cel).join(';'));
+      it.bsd ? 'ja' : '', it.ink || '', uitloopVan(it.b) ? 'ja' : '', it.opm].map(cel).join(';'));
   }
   const blob = new Blob(['﻿' + regels.join('\r\n')], { type: 'text/csv;charset=utf-8' });
   const a = document.createElement('a');
@@ -1110,7 +1159,11 @@ function laadRondjeLokaal() {
   if (!rondje.locUitz) rondje.locUitz = { ts: 0, lijst: ['ZOLDER', 'WPK', 'Oliehok'] };
   // gebiedslabels (Boven, Zolder, …) die aan route-locaties gehangen kunnen worden
   if (!rondje.gebieden) rondje.gebieden = { ts: 0, lijst: [] };
+  // uitlooplijst: artikelen die niet meer gebruikt worden en gaan verdwijnen
+  if (!rondje.uitloop) rondje.uitloop = {};
 }
+
+function uitloopVan(b) { return levend(rondje.uitloop[b]); }
 function bewaarRondje() { localStorage.setItem('mgz_rondje', JSON.stringify(rondje)); }
 
 // locaties: kast.plank.breedte[-diepte] — een route-item dekt alles wat eronder valt
@@ -1171,6 +1224,10 @@ function mergeRondje(remote) {
   for (const [k, v] of Object.entries(rondje.route)) {
     if (!route[k] || (v.ts || 0) > (route[k].ts || 0)) route[k] = v;
   }
+  const uitloop = Object.assign({}, remote.uitloop || {});
+  for (const [k, v] of Object.entries(rondje.uitloop || {})) {
+    if (!uitloop[k] || (v.ts || 0) > (uitloop[k].ts || 0)) uitloop[k] = v;
+  }
   const histMap = new Map();
   for (const h of (remote.historie || [])) histMap.set(h.id, h);
   for (const h of rondje.historie) if (!histMap.has(h.id)) histMap.set(h.id, h);
@@ -1200,7 +1257,7 @@ function mergeRondje(remote) {
     ? rondje.locUitz : remote.locUitz;
   const gebieden = (!remote.gebieden || (rondje.gebieden && (rondje.gebieden.ts || 0) >= (remote.gebieden.ts || 0)))
     ? rondje.gebieden : remote.gebieden;
-  rondje = { route, actief, historie, archiefWacht: Array.from(awMap.values()), locUitz, gebieden };
+  rondje = { route, actief, historie, archiefWacht: Array.from(awMap.values()), locUitz, gebieden, uitloop };
 }
 
 async function syncRondje() {
@@ -1231,7 +1288,7 @@ async function syncRondje() {
     const nieuw = JSON.stringify({
       route: rondje.route, actief: rondje.actief,
       historie: rondje.historie, archiefWacht: rondje.archiefWacht,
-      locUitz: rondje.locUitz, gebieden: rondje.gebieden
+      locUitz: rondje.locUitz, gebieden: rondje.gebieden, uitloop: rondje.uitloop
     });
     if (raw === null || nieuw !== raw) {
       await ghPut('rondje.json', nieuw, sha, 'Rondje bijgewerkt via app');
@@ -1830,6 +1887,7 @@ function bindEvents() {
   $('btnTerugScan').addEventListener('click', () => { sluitPaneel(); startScanner(); });
   $('btnVerwijder').addEventListener('click', verwijderRegistratie);
   $('btnBesteld').addEventListener('click', wisselBesteld);
+  $('btnUitloop').addEventListener('click', wisselUitloop);
   $('btnVorig').addEventListener('click', () => blader(-1));
   $('btnVolgend').addEventListener('click', () => blader(1));
 

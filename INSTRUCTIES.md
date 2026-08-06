@@ -57,6 +57,10 @@ Het token wordt alleen lokaal op het apparaat bewaard.
 - **Overzicht** (PC) → telverschillen en bestellingen per crediteur.
 - **Telling afronden & leegmaken** (Instellingen) → archiveert de telling in de cloud en
   begint met een schone lijst. Alleen doen als de hele telronde klaar is.
+- **Uitloop** → artikelen die niet meer gebruikt worden zet je op de uitlooplijst
+  met de knop **📉 Markeer als uitloop** in het artikelscherm. Scan je zo'n artikel,
+  dan verschijnt een rode melding ("wordt niet meer aangevuld, op = op"). De hele
+  lijst staat onderaan het **Overzicht**; zelfde knop haalt een artikel er weer af.
 - **⚠ achter een locatie** → de locatie staat niet in de standaardnotatie
   `kast.plank.breedte` (eventueel met `-diepte`, bijv. `21.10.5-4` of `54.3.5-b`).
   De app snapt zo'n locatie gewoon, maar het is een typfout in het bronsysteem.

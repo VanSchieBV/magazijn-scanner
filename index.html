@@ -58,6 +58,7 @@
           <button id="btnVolgend" aria-label="Volgend artikel">›</button>
         </div>
         <div id="artKop"></div>
+        <div class="uitloop-banner" id="uitloopBanner" hidden>📉 Uitloop — wordt niet meer aangevuld, op = op</div>
         <div class="art-grid" id="artGrid"></div>
 
         <div class="telrij">
@@ -86,6 +87,10 @@
 
         <div class="btn-row">
           <button class="btn stil" id="btnBesteld">🛒 Markeer als besteld</button>
+        </div>
+
+        <div class="btn-row">
+          <button class="btn stil" id="btnUitloop">📉 Markeer als uitloop</button>
         </div>
 
         <div class="input-row">
@@ -150,6 +155,10 @@
     <div class="card" id="kaartOpmerkingen">
       <h2>Opmerkingen</h2>
       <div class="tabel-wrap" id="ovOpmerkingen"></div>
+    </div>
+    <div class="card" id="kaartUitloop" hidden>
+      <h2 class="rood">📉 Uitloop</h2>
+      <div class="tabel-wrap" id="ovUitloop"></div>
     </div>
     <div class="btn-row">
       <button class="btn stil" id="btnCsv">⬇ Download Scanlijst (CSV)</button>

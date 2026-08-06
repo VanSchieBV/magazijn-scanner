@@ -131,6 +131,7 @@ main {
   color: var(--green);
 }
 .card h2.geel { color: var(--yellow); }
+.card h2.rood { color: var(--red); }
 
 /* ---------- Scan-startscherm ---------- */
 .scan-hero {
@@ -729,6 +730,17 @@ input.masked { -webkit-text-security: disc; }
 .item.r-skip { opacity: 0.55; }
 /* ⚠ achter een locatie: afwijkende notatie (typfout in het bronsysteem) */
 .loc-fout { color: var(--yellow); cursor: help; }
+/* melding in het artikelpaneel: dit artikel staat op de uitlooplijst */
+.uitloop-banner {
+  background: var(--red-dim);
+  border: 1px solid var(--red);
+  color: var(--red);
+  border-radius: var(--radius-s);
+  padding: 10px 13px;
+  font-size: 0.88rem;
+  font-weight: 650;
+  margin-top: 12px;
+}
 /* gebiedslabels (Boven, Zolder, …): chips om toe te wijzen + klein bij de locatie */
 .tag-rij { display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0 10px; }
 .tag-chip {
