@@ -4,7 +4,7 @@
  */
 'use strict';
 
-const VERSIE = '1.13.1';
+const VERSIE = '1.13.2';
 const DATA_REPO = 'VanSchieBV/magazijn-data';
 const API_BASE = 'https://api.github.com/repos/' + DATA_REPO + '/contents/';
 
@@ -428,12 +428,15 @@ function verwerkScan(code) {
 }
 
 // ---------- handscanner (laserscanner die als toetsenbord typt) ----------
-// de handscanner voert een code in als losse toetsaanslagen, zonder Enter en
-// zonder een veld te kiezen. We vangen die aanslagen wereldwijd af (dus zonder
-// de zoekbalk te focussen — geen schermtoetsenbord), tonen ze in de zoekbalk en
-// zoeken vanzelf zodra de scanner klaar is (korte pauze of een Enter).
+// de handscanner voert een code in als tekst, zonder Enter en zonder zelf een
+// veld te kiezen. In handscanner-modus houdt de app de zoekbalk daarom zelf
+// gefocust met inputmode="none": de invoer komt aan, maar het schermtoetsenbord
+// blijft dicht. Elke invoer wordt na een korte pauze vanzelf gezocht. Met de
+// ⌨-knop pak je het toetsenbord er bewust bij (dan zoekt hij niet vanzelf).
 let hsBuffer = '';
 let hsTimer = null;
+let hsVeldTimer = null;
+let hsTypStand = false;   // ⌨-knop actief: gewoon typen, niet automatisch zoeken
 
 function handscannerAan() { return localStorage.getItem('mgz_handscanner') === '1'; }
 
@@ -441,9 +444,39 @@ function pasHandscannerToe() {
   const aan = handscannerAan();
   $('swHandscanner').checked = aan;
   $('scanIdle').classList.toggle('handscanner', aan);
+  $('btnToetsenbord').hidden = !aan;
   document.querySelector('.scan-hint').textContent = aan
     ? 'Scan een code met de handscanner — het artikel opent vanzelf'
     : 'Richt op de code van het vak en druk op de scanknop';
+  const inp = $('zoekInput');
+  hsTypStand = false;
+  if (aan) {
+    inp.setAttribute('inputmode', 'none');
+    hsFocusVeld();
+  } else {
+    inp.removeAttribute('inputmode');
+    clearTimeout(hsVeldTimer);
+  }
+}
+
+// de zoekbalk gefocust houden zodat scannerinvoer altijd aankomt (zonder toetsenbord)
+function hsFocusVeld() {
+  if (!handscannerAan() || hsTypStand) return;
+  if (!$('view-scan').classList.contains('active') || !$('artPanel').hidden) return;
+  if (document.querySelector('.overlay.open') || camActief) return;
+  const inp = $('zoekInput');
+  inp.setAttribute('inputmode', 'none');
+  try { inp.focus({ preventScroll: true }); } catch (e) { inp.focus(); }
+}
+
+function hsVerwerkVeld() {
+  clearTimeout(hsVeldTimer);
+  const code = $('zoekInput').value.trim();
+  if (!code) return;
+  $('zoekInput').value = '';
+  $('zoekResultaten').innerHTML = '';
+  piep();
+  zoekEnOpen(code);
 }
 
 function hsVerwerk() {
@@ -713,6 +746,7 @@ function sluitPaneel() {
   $('artPanel').hidden = true;
   $('scanIdle').hidden = false;
   if (updateWacht) location.reload();
+  hsFocusVeld();
 }
 
 function leesGetal(id) {
@@ -1874,6 +1908,7 @@ function toonView(naam) {
   if (naam === 'overzicht') renderOverzicht();
   if (naam === 'lijst') renderLijst();
   if (naam === 'rondje') renderRondje();
+  if (naam === 'scan') hsFocusVeld();
 }
 
 // niet renderen terwijl er in een overzicht-veldje getypt wordt (sync zou de
@@ -1918,7 +1953,42 @@ function bindEvents() {
   $('btnKiesSluit').addEventListener('click', () => $('kiesOverlay').classList.remove('open'));
 
   $('btnZoek').addEventListener('click', handmatigZoeken);
-  $('zoekInput').addEventListener('keydown', e => { if (e.key === 'Enter') handmatigZoeken(); });
+  $('zoekInput').addEventListener('keydown', e => {
+    if (e.key !== 'Enter') return;
+    // handscanner-stand: Enter (van de scanner) = direct openen
+    if (handscannerAan() && !hsTypStand) { e.preventDefault(); hsVerwerkVeld(); }
+    else handmatigZoeken();
+  });
+
+  // handscanner-stand: elke invoer in de zoekbalk wordt na een korte pauze
+  // vanzelf gezocht (een scan is één snelle invoer van de hele code)
+  $('zoekInput').addEventListener('input', () => {
+    if (!handscannerAan() || hsTypStand) return;
+    clearTimeout(hsVeldTimer);
+    if ($('zoekInput').value.trim().length < 3) return;
+    hsVeldTimer = setTimeout(() => {
+      if (handscannerAan() && !hsTypStand) hsVerwerkVeld();
+    }, 350);
+  });
+  // ⌨-knop: toetsenbord er bewust bij pakken om te typen/zoeken
+  $('btnToetsenbord').addEventListener('click', () => {
+    const inp = $('zoekInput');
+    inp.blur(); // eerst, want blur zet de scan-stand terug
+    hsTypStand = true;
+    inp.removeAttribute('inputmode');
+    setTimeout(() => inp.focus(), 50);
+  });
+  // veld verlaten = terug naar de scan-stand (toetsenbord blijft dan weer dicht)
+  $('zoekInput').addEventListener('blur', () => {
+    if (!handscannerAan()) return;
+    hsTypStand = false;
+    $('zoekInput').setAttribute('inputmode', 'none');
+  });
+  // tik ergens op het scanscherm = focus terug op de zoekbalk voor de scanner
+  $('scanIdle').addEventListener('click', (e) => {
+    if (e.target.closest('button, input, textarea, label, .item')) return;
+    hsFocusVeld();
+  });
 
   $('inpGeteld').addEventListener('focus', () => zetActiefVeld('inpGeteld'));
   $('inpBestellen').addEventListener('focus', () => zetActiefVeld('inpBestellen'));
