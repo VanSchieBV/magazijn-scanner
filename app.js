@@ -4,7 +4,7 @@
  */
 'use strict';
 
-const VERSIE = '1.11.0';
+const VERSIE = '1.11.1';
 const DATA_REPO = 'VanSchieBV/magazijn-data';
 const API_BASE = 'https://api.github.com/repos/' + DATA_REPO + '/contents/';
 
@@ -586,6 +586,8 @@ function wisselBesteld() {
   }
   const entry = bouwEntry(false);
   entry.bsd = Date.now();
+  // het veldje in de kolom Besteld automatisch vullen met het bestelde aantal
+  if (!entry.ink && entry.best > 0) entry.ink = String(entry.best);
   telling.items[huidigeKey] = entry;
   bewaarTelling();
   planSync();
@@ -654,7 +656,10 @@ function bouwEntry(kloptDirect) {
   };
   if (art.onb) entry.onb = true;
   const oud = telling.items[huidigeKey];
-  if (oud && oud.bsd) entry.bsd = oud.bsd; // besteld-markering behouden bij opnieuw opslaan
+  // besteld-markering, besteld-aantal en klaar-vinkje behouden bij opnieuw opslaan
+  if (oud && oud.bsd) entry.bsd = oud.bsd;
+  if (oud && oud.ink) entry.ink = oud.ink;
+  if (oud && oud.kl) entry.kl = oud.kl;
   return entry;
 }
 
@@ -956,7 +961,11 @@ function renderOverzicht() {
       cb.onchange = () => {
         const aan = cb.checked;
         zetItem(cb.getAttribute('data-key'), it => {
-          if (aan) it.bsd = Date.now(); else delete it.bsd;
+          if (aan) {
+            it.bsd = Date.now();
+            // het veldje ernaast automatisch vullen met het bestelde aantal
+            if (!it.ink && it.best > 0) it.ink = String(it.best);
+          } else delete it.bsd;
         });
         toast(aan ? '🛒 Gemarkeerd als besteld' : 'Bestelmarkering verwijderd');
       };
