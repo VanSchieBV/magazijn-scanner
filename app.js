@@ -4,7 +4,7 @@
  */
 'use strict';
 
-const VERSIE = '1.11.1';
+const VERSIE = '1.11.2';
 const DATA_REPO = 'VanSchieBV/magazijn-data';
 const API_BASE = 'https://api.github.com/repos/' + DATA_REPO + '/contents/';
 
@@ -816,6 +816,11 @@ function credVan(it) {
 // filter via de vier tegels bovenaan; null = de gebruikelijke drie secties
 let ovFilter = null;
 
+// ingeklapte leveranciersblokken in het besteloverzicht (per apparaat onthouden)
+let ovDicht = new Set();
+try { ovDicht = new Set(JSON.parse(localStorage.getItem('mgz_ov_dicht') || '[]')); } catch (e) { }
+function bewaarOvDicht() { localStorage.setItem('mgz_ov_dicht', JSON.stringify(Array.from(ovDicht))); }
+
 function zetOvFilter(sectie) {
   ovFilter = (ovFilter === sectie) ? null : sectie;
   renderOverzicht();
@@ -913,20 +918,36 @@ function renderOverzicht() {
     for (const cred of Object.keys(groepen).sort()) {
       const regels = groepen[cred];
       const nogTeDoen = regels.filter(it => !it.bsd);
-      h += '<div class="cred-blok"><div class="cred-kop"><span class="naam">' + esc(cred) + '</span>' +
-        (nogTeDoen.length ? '' : '<span class="badge groen">✓ Alles besteld</span>') + '</div>';
-      h += '<div class="tabel-wrap"><table class="bestel-tabel"><tr><th>Artikel</th><th>Hun nummer</th><th>Locatie</th><th class="num">Aantal</th><th>Besteld</th></tr>';
-      for (const it of regels) {
-        const hun = it.h || it.f || '';
-        h += '<tr data-key="' + esc(it.b) + '"' + (it.bsd ? ' class="rij-besteld"' : '') + '><td><b class="art-kopie" data-kopieer="' + esc(it.a || it.b) + '">' + esc(it.a || it.b) + '</b><br><span style="color:var(--muted)">' + esc(it.o) + '</span></td>' +
-          (hun ? '<td class="hun-kopie" data-kopieer="' + esc(hun) + '">' + esc(hun) + '</td>' : '<td>–</td>') + '<td>' + locHtml(it.l) + '</td>' +
-          '<td class="num"><input type="text" class="ov-aantal" data-key="' + esc(it.b) + '" inputmode="numeric" maxlength="4" value="' + it.best + '"></td>' +
-          '<td class="besteld-cel"><input type="checkbox" class="ov-besteld" data-key="' + esc(it.b) + '"' + (it.bsd ? ' checked' : '') + '>' +
-          '<input type="text" class="ov-ink" data-key="' + esc(it.b) + '" inputmode="numeric" maxlength="8" value="' + esc(it.ink || '') + '"></td></tr>';
+      const dicht = ovDicht.has(cred);
+      h += '<div class="cred-blok"><div class="cred-kop" data-cred="' + esc(cred) + '">' +
+        '<span class="klap">' + (dicht ? '▸' : '▾') + '</span>' +
+        '<span class="naam">' + esc(cred) + '</span>' +
+        (nogTeDoen.length ? '' : '<span class="badge groen">✓ Alles besteld</span>') +
+        '<span class="cred-sub">' + regels.length + ' artikel' + (regels.length > 1 ? 'en' : '') + '</span></div>';
+      if (!dicht) {
+        h += '<div class="tabel-wrap"><table class="bestel-tabel"><tr><th>Artikel</th><th>Hun nummer</th><th>Locatie</th><th class="num">Aantal</th><th>Besteld</th></tr>';
+        for (const it of regels) {
+          const hun = it.h || it.f || '';
+          h += '<tr data-key="' + esc(it.b) + '"' + (it.bsd ? ' class="rij-besteld"' : '') + '><td><b class="art-kopie" data-kopieer="' + esc(it.a || it.b) + '">' + esc(it.a || it.b) + '</b><br><span style="color:var(--muted)">' + esc(it.o) + '</span></td>' +
+            (hun ? '<td class="hun-kopie" data-kopieer="' + esc(hun) + '">' + esc(hun) + '</td>' : '<td>–</td>') + '<td>' + locHtml(it.l) + '</td>' +
+            '<td class="num"><input type="text" class="ov-aantal" data-key="' + esc(it.b) + '" inputmode="numeric" maxlength="4" value="' + it.best + '"></td>' +
+            '<td class="besteld-cel"><input type="checkbox" class="ov-besteld" data-key="' + esc(it.b) + '"' + (it.bsd ? ' checked' : '') + '>' +
+            '<input type="text" class="ov-ink" data-key="' + esc(it.b) + '" inputmode="numeric" maxlength="8" value="' + esc(it.ink || '') + '"></td></tr>';
+        }
+        h += '</table></div>';
       }
-      h += '</table></div></div>';
+      h += '</div>';
     }
     $('ovBestellen').innerHTML = h;
+    // tik op de leverancierskop = blok in- of uitklappen
+    $('ovBestellen').querySelectorAll('.cred-kop').forEach(kop => {
+      kop.onclick = () => {
+        const cred = kop.getAttribute('data-cred');
+        if (ovDicht.has(cred)) ovDicht.delete(cred); else ovDicht.add(cred);
+        bewaarOvDicht();
+        renderOverzicht();
+      };
+    });
     koppelOverzichtRijen($('ovBestellen'));
     // tik op artikelnummer of Hun nummer kopieert die waarde, zonder de rij te openen
     $('ovBestellen').querySelectorAll('[data-kopieer]').forEach(el => {
