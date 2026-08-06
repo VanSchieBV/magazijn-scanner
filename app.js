@@ -4,7 +4,7 @@
  */
 'use strict';
 
-const VERSIE = '1.13.4';
+const VERSIE = '1.13.5';
 const DATA_REPO = 'VanSchieBV/magazijn-data';
 const API_BASE = 'https://api.github.com/repos/' + DATA_REPO + '/contents/';
 
@@ -945,7 +945,8 @@ function zetOvFilter(sectie) {
 function pasOvFilterToe() {
   const labels = {
     geteld: 'Alleen geteld', verschillen: 'Alleen telverschillen',
-    bestellen: 'Alleen te bestellen', opmerkingen: 'Alleen opmerkingen'
+    bestellen: 'Alleen te bestellen', opmerkingen: 'Alleen opmerkingen',
+    uitloop: 'Alleen uitloop'
   };
   // zonder filter blijft Geteld verborgen: die lijst is lang en staat al in Gescand
   $('kaartGeteld').hidden = ovFilter !== 'geteld';
@@ -978,11 +979,13 @@ function renderOverzicht() {
     '<button type="button" class="stat' + (kleur ? ' ' + kleur : '') +
     (ovFilter === sectie ? ' sel' : '') + '" data-sectie="' + sectie + '">' +
     '<div class="n">' + n + '</div><div class="l">' + label + '</div></button>';
+  const uitloopTotaal = Object.values(rondje.uitloop || {}).filter(u => !u.del).length;
   $('ovStats').innerHTML =
     tegel('geteld', 'groen', geteld.length, 'Geteld') +
     tegel('verschillen', 'rood', verschillen.length, 'Telverschillen') +
     tegel('bestellen', 'geel', bestellen.length, 'Te bestellen') +
-    tegel('opmerkingen', '', opmerkingen.length, 'Opmerkingen');
+    tegel('opmerkingen', '', opmerkingen.length, 'Opmerkingen') +
+    tegel('uitloop', 'rood', uitloopTotaal, '📉 Uitloop');
   $('ovStats').querySelectorAll('[data-sectie]').forEach(b => {
     b.onclick = () => zetOvFilter(b.getAttribute('data-sectie'));
   });
@@ -1131,11 +1134,14 @@ function renderOverzicht() {
     koppelOverzichtRijen($('ovOpmerkingen'));
   }
 
-  // uitloop — artikelen die niet meer gebruikt worden en gaan verdwijnen
+  // uitloop — artikelen die niet meer gebruikt worden en gaan verdwijnen;
+  // altijd de complete lijst, ook via de tegel bovenin te openen
   const uitloopItems = Object.entries(rondje.uitloop || {}).filter(x => !x[1].del)
     .sort((a, b) => String(a[1].l || '').localeCompare(String(b[1].l || ''), undefined, { numeric: true }));
-  $('kaartUitloop').hidden = !uitloopItems.length || ovFilter !== null;
-  if (uitloopItems.length) {
+  $('kaartUitloop').hidden = !(ovFilter === 'uitloop' || (ovFilter === null && uitloopItems.length > 0));
+  if (!uitloopItems.length) {
+    $('ovUitloop').innerHTML = '<div class="leeg-melding">Niets gemarkeerd als uitloop</div>';
+  } else {
     let h = '<table><tr><th>Artikel</th><th>Locatie</th><th>Op de lijst sinds</th></tr>';
     for (const [b, u] of uitloopItems) {
       h += '<tr data-b="' + esc(b) + '"><td><b>' + esc(u.a || b) + '</b><br><span style="color:var(--muted)">' + esc(u.o || '') + '</span></td>' +
