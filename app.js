@@ -4,7 +4,7 @@
  */
 'use strict';
 
-const VERSIE = '1.13.0';
+const VERSIE = '1.13.1';
 const DATA_REPO = 'VanSchieBV/magazijn-data';
 const API_BASE = 'https://api.github.com/repos/' + DATA_REPO + '/contents/';
 
@@ -1935,6 +1935,7 @@ function bindEvents() {
   $('btnKlopt').addEventListener('click', () => slaOp(true));
   $('btnAnnuleer').addEventListener('click', sluitPaneel);
   $('btnTerugScan').addEventListener('click', () => { sluitPaneel(); if (!handscannerAan()) startScanner(); });
+  $('btnTerugOverzicht').addEventListener('click', () => { sluitPaneel(); toonView('overzicht'); });
   $('btnVerwijder').addEventListener('click', verwijderRegistratie);
   $('btnBesteld').addEventListener('click', wisselBesteld);
   $('btnUitloop').addEventListener('click', wisselUitloop);
