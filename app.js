@@ -4,7 +4,7 @@
  */
 'use strict';
 
-const VERSIE = '1.13.3';
+const VERSIE = '1.13.4';
 const DATA_REPO = 'VanSchieBV/magazijn-data';
 const API_BASE = 'https://api.github.com/repos/' + DATA_REPO + '/contents/';
 
@@ -467,6 +467,8 @@ function hsFocusVeld() {
   const inp = $('zoekInput');
   inp.setAttribute('inputmode', 'none');
   try { inp.focus({ preventScroll: true }); } catch (e) { inp.focus(); }
+  // niet zijwaarts verschoven achterblijven na het focussen
+  if (window.scrollX) window.scrollTo(0, window.scrollY);
 }
 
 function hsVerwerkVeld() {

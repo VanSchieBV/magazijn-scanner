@@ -34,6 +34,8 @@ html, body {
 body {
   display: flex;
   flex-direction: column;
+  /* nooit zijwaarts kunnen schuiven, ook niet als iets per ongeluk te breed is */
+  overflow-x: hidden;
   /* --app-h wordt door JS op de echte vensterhoogte gezet; 100dvh kan op
      Android groter zijn dan de zichtbare viewport (adresbalk) en gaf scroll */
   min-height: var(--app-h, 100dvh);
