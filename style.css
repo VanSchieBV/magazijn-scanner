@@ -169,6 +169,7 @@ main {
 .search-row { display: flex; gap: 8px; }
 .search-row input {
   flex: 1;
+  min-width: 0; /* veld krimpt netjes mee; knoppen blijven op het scherm */
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-s);
@@ -179,11 +180,12 @@ main {
 }
 .search-row input:focus { border-color: var(--green); }
 .search-row button {
+  flex: none;
   background: var(--surface-2);
   border: 1px solid var(--border);
   border-radius: var(--radius-s);
   color: var(--text);
-  padding: 0 18px;
+  padding: 0 16px;
   font-size: 1rem;
   cursor: pointer;
 }

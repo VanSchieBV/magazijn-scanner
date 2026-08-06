@@ -4,7 +4,7 @@
  */
 'use strict';
 
-const VERSIE = '1.13.2';
+const VERSIE = '1.13.3';
 const DATA_REPO = 'VanSchieBV/magazijn-data';
 const API_BASE = 'https://api.github.com/repos/' + DATA_REPO + '/contents/';
 
