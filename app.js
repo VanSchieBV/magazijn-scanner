@@ -4,7 +4,7 @@
  */
 'use strict';
 
-const VERSIE = '1.12.0';
+const VERSIE = '1.12.1';
 const DATA_REPO = 'VanSchieBV/magazijn-data';
 const API_BASE = 'https://api.github.com/repos/' + DATA_REPO + '/contents/';
 
@@ -607,7 +607,7 @@ function wisselBesteld() {
 function updateUitloopUI() {
   const op = huidigeKey ? !!uitloopVan(huidigeKey) : false;
   $('uitloopBanner').hidden = !op;
-  $('btnUitloop').textContent = op ? '📉 Van de uitlooplijst halen' : '📉 Markeer als uitloop';
+  $('btnUitloop').textContent = op ? '📉 Van lijst halen' : '📉 Uitloop';
 }
 
 function wisselUitloop() {
@@ -618,6 +618,7 @@ function wisselUitloop() {
     rondje.uitloop[b] = { ts: Date.now(), del: true };
     toast((huidigArt.a || b) + ' van de uitlooplijst gehaald');
   } else {
+    if (!confirm('Weet je zeker dat je ' + (huidigArt.a || b) + ' op de uitlooplijst wilt zetten?\n\nBij het scannen krijg je dan de melding dat dit artikel niet meer wordt aangevuld.')) return;
     rondje.uitloop[b] = { a: huidigArt.a || '', o: huidigArt.o || '', l: huidigArt.l || '', ts: Date.now() };
     toast('📉 ' + (huidigArt.a || b) + ' op de uitlooplijst gezet');
   }
