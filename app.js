@@ -4,12 +4,16 @@
  */
 'use strict';
 
+// ---------- constanten ----------
 const VERSIE = '1.14.0';
 const DATA_REPO = 'VanSchieBV/magazijn-data';
 const API_BASE = 'https://api.github.com/repos/' + DATA_REPO + '/contents/';
 const SYNC_HERKANS_MS = 8000;                        // herkansing na een netwerk- of serverfout
 const SYNC_CONFLICT_MS = 1500;                       // herkansing na een conflict (ander apparaat schreef net)
 const GRAFSTEEN_BEWAAR_MS = 30 * 24 * 3600 * 1000;   // grafstenen 30 dagen bewaren
+const TRIGGER_VENSTER = 2500; // ms zoeken na een druk op de scanknop
+const fmtDatum = new Intl.DateTimeFormat('nl-NL', { weekday: 'short', day: 'numeric', month: 'short' });
+const fmtTijd = new Intl.DateTimeFormat('nl-NL', { hour: '2-digit', minute: '2-digit' });
 
 // ---------- state ----------
 // artikellijst en telling
@@ -72,6 +76,7 @@ let toastTimer = null;
 let swReg = null;              // service-worker-registratie, voor de update-check
 let updateWacht = false;       // nieuwe versie klaar; herladen zodra het artikel dicht is
 
+// ---------- algemene hulpfuncties ----------
 const $ = (id) => document.getElementById(id);
 // verwijderde registraties blijven als tombstone ({del:true, ts}) staan zodat de
 // verwijdering meesynct naar andere apparaten; overal via levend() filteren
@@ -79,6 +84,7 @@ const levend = (it) => (it && !it.del ? it : null);
 const esc = (s) => String(s == null ? '' : s)
   .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
+// ---------- locaties ----------
 // juiste locatienotatie: kast.plank of kast.plank.breedte, eventueel met -diepte
 // (bijv. 1.1, 53.4.11, 21.10.5-4, 54.3.5-b, 21.5.8-7a) — al het andere is een
 // typfout in het bronsysteem; de app snapt die locaties wél, maar markeert ze met ⚠
@@ -101,6 +107,21 @@ function locHtml(l) {
   if (!l) return '–';
   return esc(l) + (locNotatieOk(l) ? ''
     : ' <span class="loc-fout" title="Afwijkende notatie — hoort kast.plank.breedte(-diepte) te zijn">⚠</span>');
+}
+
+// locaties: kast.plank.breedte[-diepte] — een route-item dekt alles wat eronder valt
+function locSegmenten(l) {
+  return String(l || '').trim().split(/[.\-]/).map(s => s.trim()).filter(s => s !== '');
+}
+function segGelijk(a, b) {
+  if (a === b) return true;
+  if (/^\d+$/.test(a) && /^\d+$/.test(b)) return parseInt(a, 10) === parseInt(b, 10);
+  return a.toUpperCase() === b.toUpperCase();
+}
+function locValtBinnen(routeLoc, artLoc) {
+  const r = locSegmenten(routeLoc), a = locSegmenten(artLoc);
+  if (!r.length || a.length < r.length) return false;
+  return r.every((s, i) => segGelijk(s, a[i]));
 }
 
 // ---------- opslag ----------
@@ -220,88 +241,6 @@ async function ghPut(bestand, tekst, sha, bericht) {
   return (await r.json()).content.sha;
 }
 
-// ---------- artikellijst verversen ----------
-async function verversArtikelen(stil) {
-  if (!getToken()) { toonSetupBanner(); return false; }
-  try {
-    zetStatus('art', 'busy', 'Artikellijst…');
-    const info = await ghDirInfo('artikelen.json');
-    if (!info) throw new Error('artikelen.json niet gevonden in de data-repo');
-    if (info.sha === artMeta.sha && artikelen.length) {
-      zetStatus('art', 'ok', 'Actueel');
-      if (!stil) toast('Artikellijst is al actueel');
-      updateArtInfo();
-      return true;
-    }
-    const raw = await ghGetRaw('artikelen.json');
-    const d = JSON.parse(raw);
-    artikelen = d.artikelen || [];
-    artMeta = { sha: info.sha, bijgewerkt: d.bijgewerkt || '?' };
-    bouwIndex();
-    const bewaard = bewaarArt();
-    zetStatus('art', 'ok', 'Actueel');
-    if (!bewaard) toast('Artikellijst te groot voor de cache op dit toestel — hij werkt wel, maar wordt bij elke start opnieuw opgehaald', true);
-    else if (!stil) toast('Artikellijst ververst: ' + artikelen.length + ' artikelen');
-    updateArtInfo();
-    return true;
-  } catch (e) {
-    zetStatus('art', 'err', 'Fout');
-    if (!stil) toast('Verversen mislukt: ' + e.message, true);
-    return false;
-  }
-}
-
-// artikelen met een afwijkende locatienotatie; alleen opnieuw berekend als de
-// artikellijst of de uitzonderingenlijst een ander object is geworden
-function locFoutArtikelen() {
-  if (locFoutCache.art !== artikelen || locFoutCache.uitz !== rondje.locUitz) {
-    locFoutCache = { art: artikelen, uitz: rondje.locUitz, fout: artikelen.filter(a => a.l && !locNotatieOk(a.l)) };
-  }
-  return locFoutCache.fout;
-}
-
-// mislukte het ophalen van de artikellijst (bijv. een wifi-hik bij de start),
-// dan bij de volgende gelegenheid stil opnieuw proberen, zodat de fout niet de
-// hele sessie in het statusbolletje blijft staan
-function herprobeerArtikelen() {
-  if (statusPerTaak.art && statusPerTaak.art.soort === 'err' && getToken() && navigator.onLine) verversArtikelen(true);
-}
-
-function updateArtInfo() {
-  const fout = locFoutArtikelen();
-  $('artInfo').innerHTML = artikelen.length
-    ? esc(artikelen.length + ' artikelen · export van ' + artMeta.bijgewerkt) +
-      (fout.length ? '<br><span class="loc-fout">⚠ ' + fout.length + ' met afwijkende locatienotatie</span>' : '')
-    : 'Nog geen artikellijst geladen.';
-  $('btnLocFouten').hidden = !fout.length;
-}
-
-// lijst van artikelen waarvan de locatie niet als kast.plank.breedte(-diepte)
-// genoteerd staat — om de typfouten in het bronsysteem stap voor stap op te lossen
-function downloadLocFouten() {
-  const fout = locFoutArtikelen().slice().sort((a, b) => vergelijkLoc(a.l, b.l));
-  if (!fout.length) { toast('Alle locaties staan goed genoteerd 🎉'); return; }
-  const regels = ['Locatie;Artikelnummer;Korte omschrijving;Barcode'];
-  for (const a of fout) regels.push(csvRegel([a.l, a.a, a.o, a.b]));
-  downloadCsv('Afwijkende locaties ' + new Date().toISOString().slice(0, 10) + '.csv', regels);
-}
-
-// ---------- CSV ----------
-function csvCel(v) {
-  v = String(v == null ? '' : v);
-  return /[;"\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
-}
-function csvRegel(waarden) { return waarden.map(csvCel).join(';'); }
-// puntkomma-CSV met BOM, zodat Excel de UTF-8 (ë, ⚠) goed leest
-function downloadCsv(naam, regels) {
-  const blob = new Blob(['﻿' + regels.join('\r\n')], { type: 'text/csv;charset=utf-8' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = naam;
-  a.click();
-  URL.revokeObjectURL(a.href);
-}
-
 // ---------- samenvoegen ----------
 // per sleutel wint het item met de nieuwste ts; veranderd = lokaal had iets
 // wat de andere kant nog niet had (dan moet er teruggeschreven worden)
@@ -408,8 +347,237 @@ function zetStatus(taak, soort, tekst) {
   $('statusTxt').textContent = toon.tekst;
 }
 
+// ---------- telling afronden (sync-actie) ----------
+async function rondAf() {
+  const n = Object.values(telling.items).filter(it => !it.del).length;
+  if (!n) { toast('De controle is al leeg', true); return; }
+  if (!confirm('Controle afronden?\n\n' + n + ' regels worden gearchiveerd in de cloud en de lijst wordt leeggemaakt.')) return;
+  if (!getToken() || !navigator.onLine) { toast('Afronden kan alleen online', true); return; }
+  try {
+    zetStatus('telling', 'busy', 'Archiveren…');
+    // eerst alles van de andere apparaten binnenhalen; lukt dat niet, dan niets
+    // archiveren en niets wissen (anders gaan hun registraties verloren)
+    if (!await syncTellingDirect()) {
+      toast('Afronden afgebroken: sync mislukt — er is niets gewist', true);
+      return;
+    }
+    // vanaf hier geen gewone sync tussendoor: die zou de lijst en tellingSha kunnen
+    // verversen met regels die dan niet in het archief komen
+    syncBezig = true;
+    try {
+      const archiefItems = {};
+      for (const [k, v] of Object.entries(telling.items)) { if (!v.del) archiefItems[k] = v; }
+      if (!Object.keys(archiefItems).length) {
+        zetStatus('telling', 'ok', 'Gesynct');
+        toast('De controle is al leeg — waarschijnlijk net afgerond op een ander apparaat');
+        return;
+      }
+      zetStatus('telling', 'busy', 'Archiveren…');
+      const d = new Date();
+      // met seconden, zodat een nieuwe poging na een mislukt leegmaken niet botst met het archief van zonet
+      const pad = 'archief/telling-' + stempelId(d) + String(d.getSeconds()).padStart(2, '0') + '.json';
+      await ghPut(pad, JSON.stringify({ afgerond: d.toISOString(), items: archiefItems }), null, 'Telling afgerond');
+      // sha van de sync hierboven: schreef een ander apparaat intussen nog iets,
+      // dan weigert GitHub (409) en wordt er niets gewist wat niet gearchiveerd is.
+      // afgerond: andere apparaten laten hun regels van vóór dit moment vallen
+      tellingSha = await ghPut('telling.json', JSON.stringify({ items: {}, afgerond: d.getTime() }), tellingSha, 'Telling geleegd na afronden');
+      telling = { items: {}, afgerond: d.getTime(), cloud: {} };
+      bewaarTelling();
+      renderAlles();
+      zetStatus('telling', 'ok', 'Gesynct');
+      toast('Controle gearchiveerd en leeggemaakt');
+    } finally {
+      syncBezig = false;
+    }
+  } catch (e) {
+    zetStatus('telling', 'err', 'Fout');
+    toast('Afronden mislukt: ' + e.message, true);
+  }
+}
+
+// wacht tot een lopende sync klaar is en synct dan zelf; geeft true als dat lukte
+async function syncTellingDirect() {
+  clearTimeout(syncTimer);
+  while (syncBezig) await new Promise(r => setTimeout(r, 200));
+  return await syncTelling();
+}
+
+// tijdstempel-id jjjj-mm-dd_uumm (archiefnamen en rondje-id's)
+function stempelId(d) {
+  const p = (n) => String(n).padStart(2, '0');
+  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + '_' + p(d.getHours()) + p(d.getMinutes());
+}
+
+// ---------- rondje sync ----------
+function planRondjeSync() {
+  rondjeSyncNodig = true;
+  clearTimeout(rondjeSyncTimer);
+  rondjeSyncTimer = setTimeout(syncRondje, 1500);
+}
+
+function mergeRondje(remote) {
+  if (!remote) return;
+  const route = mergeOpTs(rondje.route, remote.route).samen;
+  const uitloop = mergeOpTs(rondje.uitloop, remote.uitloop).samen;
+  ruimGrafstenenOp(route, r => r.del);
+  ruimGrafstenenOp(uitloop, u => u.del);
+  const histMap = new Map();
+  for (const h of (remote.historie || [])) histMap.set(h.id, h);
+  for (const h of rondje.historie) if (!histMap.has(h.id)) histMap.set(h.id, h);
+  const historie = Array.from(histMap.values()).sort((a, b) => (a.afgerond || 0) - (b.afgerond || 0));
+  const awMap = new Map();
+  for (const a of (remote.archiefWacht || [])) awMap.set(a.id, a);
+  for (const a of rondje.archiefWacht) awMap.set(a.id, a);
+  // een actief rondje van vóór het laatst afgeronde rondje is verouderd (ander
+  // apparaat heeft al afgerond) en vervalt
+  const laatste = historie.length ? (historie[historie.length - 1].afgerond || 0) : 0;
+  const geldig = a => (a && (a.gestart || 0) > laatste) ? a : null;
+  const A = geldig(rondje.actief), B = geldig(remote.actief);
+  let actief = A || B;
+  if (A && B) {
+    const checks = mergeOpTs(A.checks, B.checks).samen;
+    const scans = mergeOpTs(A.scans, B.scans).samen;
+    actief = { gestart: Math.min(A.gestart, B.gestart), checks, scans };
+  }
+  // vinkje-grafstenen (w:'reset') alleen bij een rondje dat ongewoon lang openstaat
+  if (actief && actief.checks) ruimGrafstenenOp(actief.checks, c => c.w === 'reset');
+  // uitzonderingen- en gebiedenlijst: de laatst opgeslagen versie wint in zijn geheel
+  const locUitz = (!remote.locUitz || (rondje.locUitz && (rondje.locUitz.ts || 0) >= (remote.locUitz.ts || 0)))
+    ? rondje.locUitz : remote.locUitz;
+  const gebieden = (!remote.gebieden || (rondje.gebieden && (rondje.gebieden.ts || 0) >= (remote.gebieden.ts || 0)))
+    ? rondje.gebieden : remote.gebieden;
+  rondje = { route, actief, historie, archiefWacht: Array.from(awMap.values()), locUitz, gebieden, uitloop };
+}
+
+async function syncRondje() {
+  if (!getToken() || !navigator.onLine) return;
+  if (rondjeSyncBezig) { planRondjeSync(); return; }
+  rondjeSyncBezig = true;
+  rondjeSyncNodig = false;
+  let herkansMs = SYNC_HERKANS_MS;
+  try {
+    const { tekst: raw, sha } = await ghGetMetSha('rondje.json');
+    let remote = null;
+    if (raw !== null) {
+      try { remote = JSON.parse(raw); } catch (e) { remote = null; }
+    }
+    mergeRondje(remote);
+    // afgeronde rondjes die nog niet in het archief staan alsnog wegschrijven
+    for (const rap of rondje.archiefWacht.slice()) {
+      try {
+        await ghPut('archief/rondje-' + rap.id + '.json', JSON.stringify(rap), null, 'Rondje afgerond');
+        rondje.archiefWacht = rondje.archiefWacht.filter(x => x.id !== rap.id);
+      } catch (e) {
+        if (e.status === 422) rondje.archiefWacht = rondje.archiefWacht.filter(x => x.id !== rap.id); // stond er al
+        else throw e;
+      }
+    }
+    const nieuw = JSON.stringify({
+      route: rondje.route, actief: rondje.actief,
+      historie: rondje.historie, archiefWacht: rondje.archiefWacht,
+      locUitz: rondje.locUitz, gebieden: rondje.gebieden, uitloop: rondje.uitloop
+    });
+    if (raw === null || nieuw !== raw) {
+      await ghPut('rondje.json', nieuw, sha, 'Rondje bijgewerkt via app');
+    }
+    bewaarRondje();
+  } catch (e) {
+    // de finally-tak plant de herkansing (snel na een conflict, zie syncTelling)
+    if (e.status === 409 || e.status === 422) herkansMs = SYNC_CONFLICT_MS;
+    rondjeSyncNodig = true;
+  } finally {
+    rondjeSyncBezig = false;
+    updateRondjeUI();
+    if (rondjeSyncNodig && navigator.onLine) {
+      clearTimeout(rondjeSyncTimer);
+      rondjeSyncTimer = setTimeout(syncRondje, herkansMs);
+    }
+  }
+}
+
+// ---------- artikellijst verversen ----------
+async function verversArtikelen(stil) {
+  if (!getToken()) { toonSetupBanner(); return false; }
+  try {
+    zetStatus('art', 'busy', 'Artikellijst…');
+    const info = await ghDirInfo('artikelen.json');
+    if (!info) throw new Error('artikelen.json niet gevonden in de data-repo');
+    if (info.sha === artMeta.sha && artikelen.length) {
+      zetStatus('art', 'ok', 'Actueel');
+      if (!stil) toast('Artikellijst is al actueel');
+      updateArtInfo();
+      return true;
+    }
+    const raw = await ghGetRaw('artikelen.json');
+    const d = JSON.parse(raw);
+    artikelen = d.artikelen || [];
+    artMeta = { sha: info.sha, bijgewerkt: d.bijgewerkt || '?' };
+    bouwIndex();
+    const bewaard = bewaarArt();
+    zetStatus('art', 'ok', 'Actueel');
+    if (!bewaard) toast('Artikellijst te groot voor de cache op dit toestel — hij werkt wel, maar wordt bij elke start opnieuw opgehaald', true);
+    else if (!stil) toast('Artikellijst ververst: ' + artikelen.length + ' artikelen');
+    updateArtInfo();
+    return true;
+  } catch (e) {
+    zetStatus('art', 'err', 'Fout');
+    if (!stil) toast('Verversen mislukt: ' + e.message, true);
+    return false;
+  }
+}
+
+// artikelen met een afwijkende locatienotatie; alleen opnieuw berekend als de
+// artikellijst of de uitzonderingenlijst een ander object is geworden
+function locFoutArtikelen() {
+  if (locFoutCache.art !== artikelen || locFoutCache.uitz !== rondje.locUitz) {
+    locFoutCache = { art: artikelen, uitz: rondje.locUitz, fout: artikelen.filter(a => a.l && !locNotatieOk(a.l)) };
+  }
+  return locFoutCache.fout;
+}
+
+// mislukte het ophalen van de artikellijst (bijv. een wifi-hik bij de start),
+// dan bij de volgende gelegenheid stil opnieuw proberen, zodat de fout niet de
+// hele sessie in het statusbolletje blijft staan
+function herprobeerArtikelen() {
+  if (statusPerTaak.art && statusPerTaak.art.soort === 'err' && getToken() && navigator.onLine) verversArtikelen(true);
+}
+
+function updateArtInfo() {
+  const fout = locFoutArtikelen();
+  $('artInfo').innerHTML = artikelen.length
+    ? esc(artikelen.length + ' artikelen · export van ' + artMeta.bijgewerkt) +
+      (fout.length ? '<br><span class="loc-fout">⚠ ' + fout.length + ' met afwijkende locatienotatie</span>' : '')
+    : 'Nog geen artikellijst geladen.';
+  $('btnLocFouten').hidden = !fout.length;
+}
+
+// lijst van artikelen waarvan de locatie niet als kast.plank.breedte(-diepte)
+// genoteerd staat — om de typfouten in het bronsysteem stap voor stap op te lossen
+function downloadLocFouten() {
+  const fout = locFoutArtikelen().slice().sort((a, b) => vergelijkLoc(a.l, b.l));
+  if (!fout.length) { toast('Alle locaties staan goed genoteerd 🎉'); return; }
+  const regels = ['Locatie;Artikelnummer;Korte omschrijving;Barcode'];
+  for (const a of fout) regels.push(csvRegel([a.l, a.a, a.o, a.b]));
+  downloadCsv('Afwijkende locaties ' + new Date().toISOString().slice(0, 10) + '.csv', regels);
+}
+
+// ---------- CSV ----------
+function csvCel(v) {
+  v = String(v == null ? '' : v);
+  return /[;"\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+}
+function csvRegel(waarden) { return waarden.map(csvCel).join(';'); }
+// puntkomma-CSV met BOM, zodat Excel de UTF-8 (ë, ⚠) goed leest
+function downloadCsv(naam, regels) {
+  const blob = new Blob(['﻿' + regels.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = naam;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
 // ---------- scanner ----------
-const TRIGGER_VENSTER = 2500; // ms zoeken na een druk op de scanknop
 
 function scanActief() { return camActief && Date.now() <= scanTriggerTot; }
 
@@ -800,6 +968,40 @@ function bindKopieKnoppen(container) {
   });
 }
 
+// ---------- handmatig zoeken ----------
+function handmatigZoeken() {
+  const q = $('zoekInput').value.trim();
+  const div = $('zoekResultaten');
+  div.innerHTML = '';
+  if (!q) return;
+  const qU = q.toUpperCase();
+  // exacte treffer eerst
+  let res = (artIndex.get(q) || []).slice();
+  const opNr = artNrIndex.get(qU);
+  if (opNr && !res.includes(opNr)) res.push(opNr);
+  if (!res.length && q.length >= 2) {
+    for (const art of artikelen) {
+      if (art._zoek.includes(qU)) {
+        res.push(art);
+        if (res.length >= 40) break;
+      }
+    }
+  }
+  if (!res.length) {
+    div.innerHTML = '<div class="leeg-melding">Niets gevonden voor “' + esc(q) + '”</div>';
+    return;
+  }
+  for (const art of res) {
+    const el = document.createElement('div');
+    el.className = 'item';
+    el.innerHTML = '<div class="mid"><div class="t1">' + esc(art.o) + '</div>' +
+      '<div class="t2">' + esc(art.a) + ' · ' + (art.l ? locHtml(art.l) : 'geen locatie') + '</div></div>' +
+      '<div class="right"><span class="badge groen">' + esc(art.v) + '</span></div>';
+    el.onclick = () => { div.innerHTML = ''; $('zoekInput').value = ''; openPaneel(art); };
+    div.appendChild(el);
+  }
+}
+
 // ---------- bladeren door getelde artikelen ----------
 function bouwBlader() {
   bladerKeys = Object.entries(telling.items)
@@ -907,7 +1109,7 @@ function zetActiefVeld(id) {
   $('veldBestellen').classList.toggle('sel', id === 'inpBestellen');
 }
 
-// ---------- registratie verwijderen ----------
+// ---------- registratie opslaan en verwijderen ----------
 function verwijderRegistratie() {
   const bestaand = levend(telling.items[huidigeKey]);
   if (!bestaand) return;
@@ -1000,40 +1202,6 @@ function slaOp(kloptDirect) {
   renderAlles();
   // met de handscanner is de camera niet nodig: gewoon direct weer scannen
   if ($('swDoorscannen').checked && !handscannerAan()) startScanner();
-}
-
-// ---------- handmatig zoeken ----------
-function handmatigZoeken() {
-  const q = $('zoekInput').value.trim();
-  const div = $('zoekResultaten');
-  div.innerHTML = '';
-  if (!q) return;
-  const qU = q.toUpperCase();
-  // exacte treffer eerst
-  let res = (artIndex.get(q) || []).slice();
-  const opNr = artNrIndex.get(qU);
-  if (opNr && !res.includes(opNr)) res.push(opNr);
-  if (!res.length && q.length >= 2) {
-    for (const art of artikelen) {
-      if (art._zoek.includes(qU)) {
-        res.push(art);
-        if (res.length >= 40) break;
-      }
-    }
-  }
-  if (!res.length) {
-    div.innerHTML = '<div class="leeg-melding">Niets gevonden voor “' + esc(q) + '”</div>';
-    return;
-  }
-  for (const art of res) {
-    const el = document.createElement('div');
-    el.className = 'item';
-    el.innerHTML = '<div class="mid"><div class="t1">' + esc(art.o) + '</div>' +
-      '<div class="t2">' + esc(art.a) + ' · ' + (art.l ? locHtml(art.l) : 'geen locatie') + '</div></div>' +
-      '<div class="right"><span class="badge groen">' + esc(art.v) + '</span></div>';
-    el.onclick = () => { div.innerHTML = ''; $('zoekInput').value = ''; openPaneel(art); };
-    div.appendChild(el);
-  }
 }
 
 // ---------- lijst-weergave ----------
@@ -1369,67 +1537,6 @@ function downloadScanlijst() {
   downloadCsv('Scanlijst ' + new Date().toISOString().slice(0, 10) + '.csv', regels);
 }
 
-// ---------- telling afronden ----------
-async function rondAf() {
-  const n = Object.values(telling.items).filter(it => !it.del).length;
-  if (!n) { toast('De controle is al leeg', true); return; }
-  if (!confirm('Controle afronden?\n\n' + n + ' regels worden gearchiveerd in de cloud en de lijst wordt leeggemaakt.')) return;
-  if (!getToken() || !navigator.onLine) { toast('Afronden kan alleen online', true); return; }
-  try {
-    zetStatus('telling', 'busy', 'Archiveren…');
-    // eerst alles van de andere apparaten binnenhalen; lukt dat niet, dan niets
-    // archiveren en niets wissen (anders gaan hun registraties verloren)
-    if (!await syncTellingDirect()) {
-      toast('Afronden afgebroken: sync mislukt — er is niets gewist', true);
-      return;
-    }
-    // vanaf hier geen gewone sync tussendoor: die zou de lijst en tellingSha kunnen
-    // verversen met regels die dan niet in het archief komen
-    syncBezig = true;
-    try {
-      const archiefItems = {};
-      for (const [k, v] of Object.entries(telling.items)) { if (!v.del) archiefItems[k] = v; }
-      if (!Object.keys(archiefItems).length) {
-        zetStatus('telling', 'ok', 'Gesynct');
-        toast('De controle is al leeg — waarschijnlijk net afgerond op een ander apparaat');
-        return;
-      }
-      zetStatus('telling', 'busy', 'Archiveren…');
-      const d = new Date();
-      // met seconden, zodat een nieuwe poging na een mislukt leegmaken niet botst met het archief van zonet
-      const pad = 'archief/telling-' + stempelId(d) + String(d.getSeconds()).padStart(2, '0') + '.json';
-      await ghPut(pad, JSON.stringify({ afgerond: d.toISOString(), items: archiefItems }), null, 'Telling afgerond');
-      // sha van de sync hierboven: schreef een ander apparaat intussen nog iets,
-      // dan weigert GitHub (409) en wordt er niets gewist wat niet gearchiveerd is.
-      // afgerond: andere apparaten laten hun regels van vóór dit moment vallen
-      tellingSha = await ghPut('telling.json', JSON.stringify({ items: {}, afgerond: d.getTime() }), tellingSha, 'Telling geleegd na afronden');
-      telling = { items: {}, afgerond: d.getTime(), cloud: {} };
-      bewaarTelling();
-      renderAlles();
-      zetStatus('telling', 'ok', 'Gesynct');
-      toast('Controle gearchiveerd en leeggemaakt');
-    } finally {
-      syncBezig = false;
-    }
-  } catch (e) {
-    zetStatus('telling', 'err', 'Fout');
-    toast('Afronden mislukt: ' + e.message, true);
-  }
-}
-
-// wacht tot een lopende sync klaar is en synct dan zelf; geeft true als dat lukte
-async function syncTellingDirect() {
-  clearTimeout(syncTimer);
-  while (syncBezig) await new Promise(r => setTimeout(r, 200));
-  return await syncTelling();
-}
-
-// tijdstempel-id jjjj-mm-dd_uumm (archiefnamen en rondje-id's)
-function stempelId(d) {
-  const p = (n) => String(n).padStart(2, '0');
-  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + '_' + p(d.getHours()) + p(d.getMinutes());
-}
-
 // ---------- wekelijks rondje ----------
 // route:   {id: {loc,label,ts,del?}} — de vaste controleroute (gesynct via rondje.json),
 //          altijd gesorteerd op locatie (natuurlijk oplopend)
@@ -1438,8 +1545,6 @@ function stempelId(d) {
 //             'skip' (deze ronde overgeslagen), 'reset' (tombstone: vinkje weggehaald)
 // historie: compacte samenvattingen per rondje; het volledige rapport (incl. alle
 //           scans) staat in archief/rondje-<id>.json en wordt op verzoek opgehaald
-const fmtDatum = new Intl.DateTimeFormat('nl-NL', { weekday: 'short', day: 'numeric', month: 'short' });
-const fmtTijd = new Intl.DateTimeFormat('nl-NL', { hour: '2-digit', minute: '2-digit' });
 
 function laadRondjeLokaal() {
   try {
@@ -1467,21 +1572,6 @@ function rondjeGewijzigd() {
   bewaarRondje();
   planRondjeSync();
   updateRondjeUI();
-}
-
-// locaties: kast.plank.breedte[-diepte] — een route-item dekt alles wat eronder valt
-function locSegmenten(l) {
-  return String(l || '').trim().split(/[.\-]/).map(s => s.trim()).filter(s => s !== '');
-}
-function segGelijk(a, b) {
-  if (a === b) return true;
-  if (/^\d+$/.test(a) && /^\d+$/.test(b)) return parseInt(a, 10) === parseInt(b, 10);
-  return a.toUpperCase() === b.toUpperCase();
-}
-function locValtBinnen(routeLoc, artLoc) {
-  const r = locSegmenten(routeLoc), a = locSegmenten(artLoc);
-  if (!r.length || a.length < r.length) return false;
-  return r.every((s, i) => segGelijk(s, a[i]));
 }
 
 function routeItems() {
@@ -1512,93 +1602,6 @@ function rondjeDue() {
   const laatste = rondje.historie.length ? rondje.historie[rondje.historie.length - 1].afgerond : 0;
   if (laatste && isoWeekKey(laatste) === isoWeekKey(nu)) return false;
   return (new Date().getDay() + 6) % 7 >= parseInt(dag, 10);
-}
-
-// ---------- rondje sync ----------
-function planRondjeSync() {
-  rondjeSyncNodig = true;
-  clearTimeout(rondjeSyncTimer);
-  rondjeSyncTimer = setTimeout(syncRondje, 1500);
-}
-
-function mergeRondje(remote) {
-  if (!remote) return;
-  const route = mergeOpTs(rondje.route, remote.route).samen;
-  const uitloop = mergeOpTs(rondje.uitloop, remote.uitloop).samen;
-  ruimGrafstenenOp(route, r => r.del);
-  ruimGrafstenenOp(uitloop, u => u.del);
-  const histMap = new Map();
-  for (const h of (remote.historie || [])) histMap.set(h.id, h);
-  for (const h of rondje.historie) if (!histMap.has(h.id)) histMap.set(h.id, h);
-  const historie = Array.from(histMap.values()).sort((a, b) => (a.afgerond || 0) - (b.afgerond || 0));
-  const awMap = new Map();
-  for (const a of (remote.archiefWacht || [])) awMap.set(a.id, a);
-  for (const a of rondje.archiefWacht) awMap.set(a.id, a);
-  // een actief rondje van vóór het laatst afgeronde rondje is verouderd (ander
-  // apparaat heeft al afgerond) en vervalt
-  const laatste = historie.length ? (historie[historie.length - 1].afgerond || 0) : 0;
-  const geldig = a => (a && (a.gestart || 0) > laatste) ? a : null;
-  const A = geldig(rondje.actief), B = geldig(remote.actief);
-  let actief = A || B;
-  if (A && B) {
-    const checks = mergeOpTs(A.checks, B.checks).samen;
-    const scans = mergeOpTs(A.scans, B.scans).samen;
-    actief = { gestart: Math.min(A.gestart, B.gestart), checks, scans };
-  }
-  // vinkje-grafstenen (w:'reset') alleen bij een rondje dat ongewoon lang openstaat
-  if (actief && actief.checks) ruimGrafstenenOp(actief.checks, c => c.w === 'reset');
-  // uitzonderingen- en gebiedenlijst: de laatst opgeslagen versie wint in zijn geheel
-  const locUitz = (!remote.locUitz || (rondje.locUitz && (rondje.locUitz.ts || 0) >= (remote.locUitz.ts || 0)))
-    ? rondje.locUitz : remote.locUitz;
-  const gebieden = (!remote.gebieden || (rondje.gebieden && (rondje.gebieden.ts || 0) >= (remote.gebieden.ts || 0)))
-    ? rondje.gebieden : remote.gebieden;
-  rondje = { route, actief, historie, archiefWacht: Array.from(awMap.values()), locUitz, gebieden, uitloop };
-}
-
-async function syncRondje() {
-  if (!getToken() || !navigator.onLine) return;
-  if (rondjeSyncBezig) { planRondjeSync(); return; }
-  rondjeSyncBezig = true;
-  rondjeSyncNodig = false;
-  let herkansMs = SYNC_HERKANS_MS;
-  try {
-    const { tekst: raw, sha } = await ghGetMetSha('rondje.json');
-    let remote = null;
-    if (raw !== null) {
-      try { remote = JSON.parse(raw); } catch (e) { remote = null; }
-    }
-    mergeRondje(remote);
-    // afgeronde rondjes die nog niet in het archief staan alsnog wegschrijven
-    for (const rap of rondje.archiefWacht.slice()) {
-      try {
-        await ghPut('archief/rondje-' + rap.id + '.json', JSON.stringify(rap), null, 'Rondje afgerond');
-        rondje.archiefWacht = rondje.archiefWacht.filter(x => x.id !== rap.id);
-      } catch (e) {
-        if (e.status === 422) rondje.archiefWacht = rondje.archiefWacht.filter(x => x.id !== rap.id); // stond er al
-        else throw e;
-      }
-    }
-    const nieuw = JSON.stringify({
-      route: rondje.route, actief: rondje.actief,
-      historie: rondje.historie, archiefWacht: rondje.archiefWacht,
-      locUitz: rondje.locUitz, gebieden: rondje.gebieden, uitloop: rondje.uitloop
-    });
-    if (raw === null || nieuw !== raw) {
-      await ghPut('rondje.json', nieuw, sha, 'Rondje bijgewerkt via app');
-    }
-    bewaarRondje();
-  } catch (e) {
-    // de finally-tak plant de herkansing (snel na een conflict, zie syncTelling)
-    if (e.status === 409 || e.status === 422) herkansMs = SYNC_CONFLICT_MS;
-    rondjeSyncNodig = true;
-  } finally {
-    rondjeSyncBezig = false;
-    updateRondjeUI();
-    if (rondjeSyncNodig && navigator.onLine) {
-      clearTimeout(rondjeSyncTimer);
-      rondjeSyncTimer = setTimeout(syncRondje, herkansMs);
-    }
-  }
 }
 
 // ---------- rondje kernacties ----------
