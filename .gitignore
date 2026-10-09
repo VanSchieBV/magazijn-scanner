@@ -1,2 +1,16 @@
 # Bronexports met bedrijfsdata (o.a. inkoopprijzen) — nooit naar de publieke repo
 Bron/
+# vangnet: ook een export die per ongeluk buiten Bron/ belandt gaat niet mee
+*.xlsx
+*.csv
+
+# runtime-bestanden van de geplande taak (pc/Artikellijst-bijwerken-taak.ps1)
+pc/_laatst-verwerkt.txt
+pc/bijwerken-taak.log
+pc/_cred_tmp.txt
+
+# lokale permissies van Claude Code (per pc)
+.claude/settings.local.json
+
+# Python-cache van de testreeks (tests/)
+__pycache__/

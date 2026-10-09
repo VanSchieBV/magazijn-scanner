@@ -1,5 +1,7 @@
 /* Service worker — bij elke wijziging aan de app: VERSION ophogen! */
-const VERSION = 'mgz-v1.13.5';
+const VERSION = 'mgz-v1.14.0';
+// zxing.min.js laadt app.js alleen op toestellen zonder BarcodeDetector, maar hij
+// hoort wel in de cache zodat de fallback ook offline werkt
 const SHELL = [
   './',
   'index.html',

@@ -37,8 +37,8 @@
 
       <div class="switch-row handscanner-row">
         <div>
-          <div style="font-size:.9rem;">Handscanner</div>
-          <div style="font-size:.78rem;color:var(--muted);">Scannen met de laserscanner — camera uit</div>
+          <div class="switch-titel">Handscanner</div>
+          <div class="bijschrift">Scannen met de laserscanner — camera uit</div>
         </div>
         <label class="switch"><input type="checkbox" id="swHandscanner"><span class="track"></span></label>
       </div>
@@ -117,10 +117,10 @@
 
   <!-- ============ GETELD ============ -->
   <section class="view" id="view-lijst">
-    <div class="card" style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+    <div class="card lijst-kop">
       <div>
-        <div style="font-weight:650;">Controle</div>
-        <div style="font-size:.8rem;color:var(--muted);margin-top:2px;" id="lijstSub">–</div>
+        <div class="lijst-titel">Controle</div>
+        <div class="lijst-sub" id="lijstSub">–</div>
       </div>
       <button class="btn stil klein" id="btnSyncNu">↻ Sync</button>
     </div>
@@ -181,7 +181,7 @@
         <input type="text" id="inpToken" class="masked" placeholder="github_pat_…" autocomplete="off" autocapitalize="off" spellcheck="false">
         <div class="sub">Token met alleen <b>Contents: read &amp; write</b> op de privé-repo <b>magazijn-data</b>.</div>
       </div>
-      <div class="btn-row" style="margin-top:0;">
+      <div class="btn-row direct">
         <button class="btn primair" id="btnTokenOpslaan">Opslaan &amp; testen</button>
       </div>
     </div>
@@ -191,18 +191,18 @@
       <div class="set-row">
         <div class="sub" id="artInfo">–</div>
       </div>
-      <div class="btn-row" style="margin-top:0;">
+      <div class="btn-row direct">
         <button class="btn stil" id="btnArtVerversen">↻ Artikellijst verversen</button>
       </div>
       <div class="btn-row">
         <button class="btn stil" id="btnLocFouten" hidden>⚠ Afwijkende locaties (CSV)</button>
       </div>
-      <div class="set-row" style="margin-top:14px;">
+      <div class="set-row ruim">
         <div class="lbl">Toegestane vrije locaties (één per regel)</div>
         <textarea id="inpLocUitz" rows="3" placeholder="ZOLDER&#10;WPK&#10;Oliehok"></textarea>
         <div class="sub">Bewust gekozen locaties die geen kastnotatie zijn — deze tellen als goed en krijgen geen ⚠. Hoofdletters maken niet uit.</div>
       </div>
-      <div class="btn-row" style="margin-top:0;">
+      <div class="btn-row direct">
         <button class="btn stil" id="btnLocUitzOpslaan">Uitzonderingen opslaan</button>
       </div>
     </div>
@@ -211,19 +211,19 @@
       <h2>Werkwijze</h2>
       <div class="switch-row">
         <div>
-          <div style="font-size:.9rem;">Direct doorscannen</div>
-          <div style="font-size:.78rem;color:var(--muted);">Na opslaan meteen de camera weer openen</div>
+          <div class="switch-titel">Direct doorscannen</div>
+          <div class="bijschrift">Na opslaan meteen de camera weer openen</div>
         </div>
         <label class="switch"><input type="checkbox" id="swDoorscannen"><span class="track"></span></label>
       </div>
       <div class="switch-row">
         <div>
-          <div style="font-size:.9rem;">Scanknop boven de zoekbalk</div>
-          <div style="font-size:.78rem;color:var(--muted);">Wissel de volgorde op het scanscherm</div>
+          <div class="switch-titel">Scanknop boven de zoekbalk</div>
+          <div class="bijschrift">Wissel de volgorde op het scanscherm</div>
         </div>
         <label class="switch"><input type="checkbox" id="swKnopBoven"><span class="track"></span></label>
       </div>
-      <div class="set-row" style="margin-top:14px;">
+      <div class="set-row ruim">
         <div class="lbl">Hoogte van zoekbalk &amp; scanknop</div>
         <input type="range" id="slScanPos" min="0" max="100" step="5">
         <div class="sub">Naar links = hoger op het scherm, naar rechts = lager.</div>
@@ -250,14 +250,14 @@
 
     <div class="card">
       <h2 class="geel">Controle afronden</h2>
-      <div class="sub" style="color:var(--muted);font-size:.83rem;margin-bottom:12px;">
+      <div class="uitleg met-ruimte">
         Archiveert de huidige controle in de cloud en maakt de lijst leeg voor een nieuwe ronde.
       </div>
-      <div class="btn-row" style="margin-top:0;">
+      <div class="btn-row direct">
         <button class="btn geel" id="btnAfronden">Controle afronden &amp; leegmaken</button>
       </div>
     </div>
-    <div style="text-align:center;color:var(--muted);font-size:.75rem;padding:8px;" id="versieInfo"></div>
+    <div class="versie-info" id="versieInfo"></div>
   </section>
 </main>
 
@@ -320,7 +320,7 @@
 <div class="overlay" id="checkOverlay">
   <div class="sheet">
     <h3 id="checkTitel">–</h3>
-    <div id="checkStatus" style="color:var(--muted);font-size:.83rem;margin-bottom:12px;">–</div>
+    <div id="checkStatus" class="uitleg met-ruimte">–</div>
     <div class="input-row">
       <div class="lbl">Opmerking</div>
       <textarea id="inpCheckOpm" rows="2" placeholder="Bijv. bakje bijna leeg, la klemt…"></textarea>
@@ -377,7 +377,7 @@
   </div>
 </nav>
 
-<script src="zxing.min.js"></script>
+<!-- zxing.min.js wordt alleen geladen als de camera geen BarcodeDetector heeft (app.js, laadZxing) -->
 <script src="app.js"></script>
 </body>
 </html>

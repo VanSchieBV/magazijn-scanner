@@ -20,6 +20,8 @@
 }
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+/* hidden moet altijd winnen, ook van een eigen display:flex (bijv. .blader-nav) */
+[hidden] { display: none !important; }
 
 html, body {
   margin: 0;
@@ -102,7 +104,6 @@ main {
   flex-direction: column;
   min-height: 0;
 }
-#scanIdle[hidden] { display: none; }
 /* verticale positie van zoekbalk + scanknop: instelbaar via de spacers
    (--ruimte-boven/-onder, gezet vanuit Instellingen); 100/0 = onderaan */
 #scanBoven { flex: var(--ruimte-boven, 100) 1 0; min-height: 0; }
@@ -450,7 +451,6 @@ textarea {
 textarea:focus { border-color: var(--green); }
 
 .btn-row { display: flex; gap: 10px; margin-top: 12px; }
-.btn-row[hidden] { display: none; }
 .btn {
   flex: 1;
   border: none;
@@ -537,6 +537,25 @@ textarea:focus { border-color: var(--green); }
   padding: 34px 12px;
   font-size: 0.9rem;
 }
+.leeg-melding.compact { padding: 14px; }
+
+/* ---------- tekst- en hulpklassen (vervangen de vroegere inline styles) ---------- */
+.muted { color: var(--muted); }
+.uitleg { color: var(--muted); font-size: 0.83rem; }       /* toelichting in een kaart of sheet */
+.uitleg.met-ruimte { margin-bottom: 12px; }
+.uitleg.hist-kop { margin-bottom: 10px; }
+.tussenkop { font-size: 0.8rem; color: var(--muted); margin: 8px 0 6px; }
+.tussenkop.ruim { margin-top: 10px; }
+.voortgang { font-size: 0.85rem; color: var(--muted); margin-top: 6px; }
+.switch-titel { font-size: 0.9rem; }
+.bijschrift { font-size: 0.78rem; color: var(--muted); }   /* onder een schakelaar of in een sheet */
+.item.vast { cursor: default; }
+.btn-row.direct { margin-top: 0; }
+.set-row.ruim { margin-top: 14px; }
+.lijst-kop { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.lijst-titel { font-weight: 650; }
+.lijst-sub { font-size: 0.8rem; color: var(--muted); margin-top: 2px; }
+.versie-info { text-align: center; color: var(--muted); font-size: 0.75rem; padding: 8px; }
 
 /* ---------- Overzicht ---------- */
 .stats {
@@ -590,6 +609,8 @@ tr:last-child td { border-bottom: none; }
 tr[data-key] { cursor: pointer; }
 tr[data-key]:active td { background: var(--surface-2); }
 td.num, th.num { text-align: right; }
+td.num.klopt { color: var(--green); font-weight: 600; }
+td.num.afwijkend { color: var(--red); font-weight: 600; }
 /* Hun nummer in het artikelscherm: tik op de waarde = kopieer */
 .kopieer-waarde { color: var(--green); text-decoration: underline dotted; text-underline-offset: 3px; cursor: pointer; }
 .kopieer-waarde::after { content: ' ⧉'; color: var(--muted); font-size: 0.85em; }
@@ -666,7 +687,7 @@ td.besteld-cel input[type="checkbox"] {
 /* gemaskeerd tekstveld: oogt als wachtwoordveld, maar Chrome's wachtwoordmanager blijft eraf */
 input.masked { -webkit-text-security: disc; }
 #slScanPos { width: 100%; accent-color: var(--green-strong); margin: 6px 0; }
-.set-row input[type="password"], .set-row input[type="text"] {
+.set-row input[type="text"] {
   width: 100%;
   background: var(--bg);
   border: 1px solid var(--border);

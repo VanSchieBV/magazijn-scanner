@@ -4,22 +4,73 @@
  */
 'use strict';
 
-const VERSIE = '1.13.5';
+const VERSIE = '1.14.0';
 const DATA_REPO = 'VanSchieBV/magazijn-data';
 const API_BASE = 'https://api.github.com/repos/' + DATA_REPO + '/contents/';
+const SYNC_HERKANS_MS = 8000;                        // herkansing na een netwerk- of serverfout
+const SYNC_CONFLICT_MS = 1500;                       // herkansing na een conflict (ander apparaat schreef net)
+const GRAFSTEEN_BEWAAR_MS = 30 * 24 * 3600 * 1000;   // grafstenen 30 dagen bewaren
 
 // ---------- state ----------
-let artikelen = [];            // [{b,a,o,c,f,h,l,v}]
+// artikellijst en telling
+let artikelen = [];            // [{b,a,o,c,f,h,l,v}] (+ _zoek, alleen in het geheugen)
+let artMeta = { sha: null, bijgewerkt: '?' };   // sha en exportdatum van de geladen artikellijst
 let artIndex = new Map();      // barcode -> [artikel,...]
 let artNrIndex = new Map();    // artikelnummer (upper) -> artikel
-let telling = { items: {} };   // key -> {b,a,o,c,f,h,l,v,g,best,opm,ts,onb}
+let telling = { items: {} };   // key -> {b,a,o,c,f,h,l,v,g,best,opm,ts,onb,bsd,ink,kl} of grafsteen {b,ts,del}
+let locFoutCache = { art: null, uitz: null, fout: [] };   // artikelen met afwijkende locatienotatie
+let uitzCache = { bron: null, set: new Set() };           // uitzonderingenlijst als Set (kleine letters)
+
+// artikelpaneel
 let huidigeKey = null;         // key van artikel in het open paneel
 let huidigArt = null;          // artikel-object in het open paneel
 let bladerKeys = [];           // volgorde om door getelde artikelen te bladeren
 let bladerIdx = -1;
+let actiefVeld = 'inpGeteld';  // telveld waar − en + op werken
+
+// telling-sync en statusbolletje
 let syncTimer = null;
 let syncBezig = false;
 let syncNodig = false;
+let tellingSha = null;         // sha van telling.json na de laatste geslaagde sync
+let statusPerTaak = {};        // 'art' | 'telling' -> {soort, tekst}
+
+// wekelijks rondje (opbouw: zie de sectie "wekelijks rondje")
+let rondje = { route: {}, actief: null, historie: [], archiefWacht: [] };
+let rondjeSyncTimer = null;
+let rondjeSyncBezig = false;
+let rondjeSyncNodig = false;
+let routeSheetId = null;       // route-item in het bewerk-sheet (null = nieuw)
+let routeSheetGebied = null;   // gekozen gebied in dat sheet
+let checkSheetId = null;       // route-item in het afvink-sheet
+let histCsvData = null;        // volledig rapport van het open historie-sheet (voor de CSV)
+
+// camera-scanner
+let camStream = null;
+let camActief = false;
+let zxingReader = null;
+let zxingLaden = null;         // belofte van het laden van zxing.min.js
+let detectorLus = null;
+let audioCtx = null;
+let scanTriggerTot = 0;        // tot welk tijdstip (ms) er actief gescand wordt
+let triggerTimer = null;
+let scanCanvas = null;
+
+// handscanner
+let hsBuffer = '';
+let hsTimer = null;
+let hsVeldTimer = null;
+let hsTypStand = false;        // ⌨-knop actief: gewoon typen, niet automatisch zoeken
+
+// overzicht
+let ovFilter = null;           // filter via de tegels bovenaan; null = de gebruikelijke secties
+let ovDicht = new Set();       // ingeklapte leveranciersblokken (per apparaat, mgz_ov_dicht)
+let renderUitgesteld = false;  // render wacht tot een overzicht-veldje verlaten wordt
+
+// overig
+let toastTimer = null;
+let swReg = null;              // service-worker-registratie, voor de update-check
+let updateWacht = false;       // nieuwe versie klaar; herladen zodra het artikel dicht is
 
 const $ = (id) => document.getElementById(id);
 // verwijderde registraties blijven als tombstone ({del:true, ts}) staan zodat de
@@ -34,11 +85,18 @@ const esc = (s) => String(s == null ? '' : s)
 const LOC_NOTATIE = /^\d+\.\d+(\.\d+)?(-[0-9a-z]+)?$/i;
 // bewust gekozen vrije locaties (ZOLDER, WPK, Oliehok, …) staan op een
 // uitzonderingenlijst (Instellingen → Artikellijst) en tellen als juiste notatie
+// (als Set in kleine letters, opnieuw opgebouwd zodra rondje.locUitz een ander object is)
 function locUitzondering(l) {
-  const s = String(l).trim().toLowerCase();
-  return ((rondje.locUitz && rondje.locUitz.lijst) || []).some(u => u.trim().toLowerCase() === s);
+  if (uitzCache.bron !== rondje.locUitz) {
+    const lijst = (rondje.locUitz && rondje.locUitz.lijst) || [];
+    uitzCache = { bron: rondje.locUitz, set: new Set(lijst.map(u => String(u).trim().toLowerCase())) };
+  }
+  return uitzCache.set.has(String(l).trim().toLowerCase());
 }
 function locNotatieOk(l) { return LOC_NOTATIE.test(String(l).trim()) || locUitzondering(l); }
+// locaties overal natuurlijk oplopend: 2.1 vóór 11.2, 21.2 vóór 21.10, letters alfabetisch
+const locSorteerder = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+function vergelijkLoc(a, b) { return locSorteerder.compare(String(a || ''), String(b || '')); }
 function locHtml(l) {
   if (!l) return '–';
   return esc(l) + (locNotatieOk(l) ? ''
@@ -61,13 +119,23 @@ function laadLokaal() {
     if (t) telling = JSON.parse(t);
     if (!telling.items) telling.items = {};
   } catch (e) { telling = { items: {} }; }
+  try { ovDicht = new Set(JSON.parse(localStorage.getItem('mgz_ov_dicht') || '[]')); } catch (e) { /* negeren */ }
 }
-let artMeta = { sha: null, bijgewerkt: '?' };
 
+// geeft false als de opslag van het toestel vol is (localStorage: ca. 5 MB per
+// site; de lijst is nu ca. 1,2 MB). De lijst werkt dan wel, maar staat na een
+// herstart niet klaar en wordt opnieuw opgehaald. Grotere lijsten: IndexedDB.
 function bewaarArt() {
-  localStorage.setItem('mgz_art', JSON.stringify({
-    sha: artMeta.sha, bijgewerkt: artMeta.bijgewerkt, artikelen
-  }));
+  try {
+    // _zoek is afgeleid (bouwIndex) en hoeft niet in de cache
+    localStorage.setItem('mgz_art', JSON.stringify({
+      sha: artMeta.sha, bijgewerkt: artMeta.bijgewerkt, artikelen
+    }, (k, v) => (k === '_zoek' ? undefined : v)));
+    return true;
+  } catch (e) {
+    if (e && (e.name === 'QuotaExceededError' || e.code === 22)) return false;
+    throw e;
+  }
 }
 function bewaarTelling() {
   localStorage.setItem('mgz_telling', JSON.stringify(telling));
@@ -81,6 +149,9 @@ function bouwIndex() {
     const lijst = artIndex.get(art.b);
     if (lijst) lijst.push(art); else artIndex.set(art.b, [art]);
     if (art.a) artNrIndex.set(art.a.toUpperCase(), art);
+    // één zoekstring per artikel; \n als scheiding zodat een zoekterm nooit over
+    // twee velden heen matcht. Een ontbrekend veld is gewoon leeg.
+    art._zoek = [art.o, art.a, art.f, art.h, art.b, art.l].map(v => v || '').join('\n').toUpperCase();
   }
 }
 
@@ -92,10 +163,17 @@ function ghHeaders(extra) {
   }, extra || {});
 }
 
+// fout met de HTTP-status erbij, zodat de sync 401/403 en 409/422 kan herkennen
+function ghFout(status) {
+  const e = new Error('GitHub ' + status);
+  e.status = status;
+  return e;
+}
+
 async function ghDirInfo(bestand) {
   // sha van een bestand opvragen via de mapindex (werkt ook voor bestanden > 1 MB)
   const r = await fetch(API_BASE + '?t=' + Date.now(), { headers: ghHeaders() });
-  if (!r.ok) throw new Error('GitHub ' + r.status);
+  if (!r.ok) throw ghFout(r.status);
   const lijst = await r.json();
   return lijst.find(x => x.name === bestand) || null;
 }
@@ -105,8 +183,25 @@ async function ghGetRaw(bestand) {
     headers: ghHeaders({ 'Accept': 'application/vnd.github.raw+json' })
   });
   if (r.status === 404) return null;
-  if (!r.ok) throw new Error('GitHub ' + r.status);
+  if (!r.ok) throw ghFout(r.status);
   return await r.text();
+}
+
+// inhoud én sha in één verzoek, dus uit dezelfde versie van het bestand. Voor de
+// kleine syncbestanden (telling.json, rondje.json); twee losse verzoeken gaven een
+// race waarin een wijziging van een ander apparaat overschreven kon worden.
+// artikelen.json kan groter dan 1 MB zijn en gaat via ghDirInfo + ghGetRaw.
+async function ghGetMetSha(bestand) {
+  const r = await fetch(API_BASE + bestand + '?t=' + Date.now(), {
+    headers: ghHeaders({ 'Accept': 'application/vnd.github+json' })
+  });
+  if (r.status === 404) return { tekst: null, sha: null };
+  if (!r.ok) throw ghFout(r.status);
+  const d = await r.json();
+  // boven 1 MB levert de API geen inhoud mee; dan alsnog los ophalen
+  if (d.encoding !== 'base64') return { tekst: await ghGetRaw(bestand), sha: d.sha };
+  const bin = atob((d.content || '').replace(/\n/g, ''));
+  return { tekst: new TextDecoder().decode(Uint8Array.from(bin, ch => ch.charCodeAt(0))), sha: d.sha };
 }
 
 async function ghPut(bestand, tekst, sha, bericht) {
@@ -121,11 +216,7 @@ async function ghPut(bestand, tekst, sha, bericht) {
     method: 'PUT', headers: ghHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify(body)
   });
-  if (!r.ok) {
-    const e = new Error('GitHub ' + r.status);
-    e.status = r.status;
-    throw e;
-  }
+  if (!r.ok) throw ghFout(r.status);
   return (await r.json()).content.sha;
 }
 
@@ -133,11 +224,11 @@ async function ghPut(bestand, tekst, sha, bericht) {
 async function verversArtikelen(stil) {
   if (!getToken()) { toonSetupBanner(); return false; }
   try {
-    zetStatus('busy', 'Artikellijst…');
+    zetStatus('art', 'busy', 'Artikellijst…');
     const info = await ghDirInfo('artikelen.json');
     if (!info) throw new Error('artikelen.json niet gevonden in de data-repo');
     if (info.sha === artMeta.sha && artikelen.length) {
-      zetStatus('ok', 'Actueel');
+      zetStatus('art', 'ok', 'Actueel');
       if (!stil) toast('Artikellijst is al actueel');
       updateArtInfo();
       return true;
@@ -147,20 +238,37 @@ async function verversArtikelen(stil) {
     artikelen = d.artikelen || [];
     artMeta = { sha: info.sha, bijgewerkt: d.bijgewerkt || '?' };
     bouwIndex();
-    bewaarArt();
-    zetStatus('ok', 'Actueel');
-    if (!stil) toast('Artikellijst ververst: ' + artikelen.length + ' artikelen');
+    const bewaard = bewaarArt();
+    zetStatus('art', 'ok', 'Actueel');
+    if (!bewaard) toast('Artikellijst te groot voor de cache op dit toestel — hij werkt wel, maar wordt bij elke start opnieuw opgehaald', true);
+    else if (!stil) toast('Artikellijst ververst: ' + artikelen.length + ' artikelen');
     updateArtInfo();
     return true;
   } catch (e) {
-    zetStatus('err', 'Fout');
+    zetStatus('art', 'err', 'Fout');
     if (!stil) toast('Verversen mislukt: ' + e.message, true);
     return false;
   }
 }
 
+// artikelen met een afwijkende locatienotatie; alleen opnieuw berekend als de
+// artikellijst of de uitzonderingenlijst een ander object is geworden
+function locFoutArtikelen() {
+  if (locFoutCache.art !== artikelen || locFoutCache.uitz !== rondje.locUitz) {
+    locFoutCache = { art: artikelen, uitz: rondje.locUitz, fout: artikelen.filter(a => a.l && !locNotatieOk(a.l)) };
+  }
+  return locFoutCache.fout;
+}
+
+// mislukte het ophalen van de artikellijst (bijv. een wifi-hik bij de start),
+// dan bij de volgende gelegenheid stil opnieuw proberen, zodat de fout niet de
+// hele sessie in het statusbolletje blijft staan
+function herprobeerArtikelen() {
+  if (statusPerTaak.art && statusPerTaak.art.soort === 'err' && getToken() && navigator.onLine) verversArtikelen(true);
+}
+
 function updateArtInfo() {
-  const fout = artikelen.filter(a => a.l && !locNotatieOk(a.l));
+  const fout = locFoutArtikelen();
   $('artInfo').innerHTML = artikelen.length
     ? esc(artikelen.length + ' artikelen · export van ' + artMeta.bijgewerkt) +
       (fout.length ? '<br><span class="loc-fout">⚠ ' + fout.length + ' met afwijkende locatienotatie</span>' : '')
@@ -171,21 +279,50 @@ function updateArtInfo() {
 // lijst van artikelen waarvan de locatie niet als kast.plank.breedte(-diepte)
 // genoteerd staat — om de typfouten in het bronsysteem stap voor stap op te lossen
 function downloadLocFouten() {
-  const fout = artikelen.filter(a => a.l && !locNotatieOk(a.l))
-    .sort((a, b) => String(a.l).localeCompare(String(b.l), undefined, { numeric: true }));
+  const fout = locFoutArtikelen().slice().sort((a, b) => vergelijkLoc(a.l, b.l));
   if (!fout.length) { toast('Alle locaties staan goed genoteerd 🎉'); return; }
-  const cel = (v) => {
-    v = String(v == null ? '' : v);
-    return /[;"\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
-  };
   const regels = ['Locatie;Artikelnummer;Korte omschrijving;Barcode'];
-  for (const a of fout) regels.push([a.l, a.a, a.o, a.b].map(cel).join(';'));
+  for (const a of fout) regels.push(csvRegel([a.l, a.a, a.o, a.b]));
+  downloadCsv('Afwijkende locaties ' + new Date().toISOString().slice(0, 10) + '.csv', regels);
+}
+
+// ---------- CSV ----------
+function csvCel(v) {
+  v = String(v == null ? '' : v);
+  return /[;"\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+}
+function csvRegel(waarden) { return waarden.map(csvCel).join(';'); }
+// puntkomma-CSV met BOM, zodat Excel de UTF-8 (ë, ⚠) goed leest
+function downloadCsv(naam, regels) {
   const blob = new Blob(['﻿' + regels.join('\r\n')], { type: 'text/csv;charset=utf-8' });
-  const el = document.createElement('a');
-  el.href = URL.createObjectURL(blob);
-  el.download = 'Afwijkende locaties ' + new Date().toISOString().slice(0, 10) + '.csv';
-  el.click();
-  URL.revokeObjectURL(el.href);
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = naam;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+// ---------- samenvoegen ----------
+// per sleutel wint het item met de nieuwste ts; veranderd = lokaal had iets
+// wat de andere kant nog niet had (dan moet er teruggeschreven worden)
+function mergeOpTs(lokaal, remote) {
+  const samen = Object.assign({}, remote || {});
+  let veranderd = false;
+  for (const [k, v] of Object.entries(lokaal || {})) {
+    if (!samen[k] || (v.ts || 0) > (samen[k].ts || 0)) { samen[k] = v; veranderd = true; }
+  }
+  return { samen, veranderd };
+}
+
+// grafstenen ruim na de verwijdering weglaten: alle apparaten hebben ze dan al
+// verwerkt. Geeft het aantal opgeruimde sleutels terug.
+function ruimGrafstenenOp(obj, isGrafsteen) {
+  const grens = Date.now() - GRAFSTEEN_BEWAAR_MS;
+  let n = 0;
+  for (const [k, v] of Object.entries(obj)) {
+    if (isGrafsteen(v) && (v.ts || 0) < grens) { delete obj[k]; n++; }
+  }
+  return n;
 }
 
 // ---------- telling sync ----------
@@ -195,60 +332,83 @@ function planSync() {
   syncTimer = setTimeout(syncTelling, 1500);
 }
 
+// geeft true terug als ophalen, samenvoegen en terugschrijven gelukt zijn
 async function syncTelling() {
-  if (!getToken() || !navigator.onLine) { zetStatus('err', 'Offline'); return; }
-  if (syncBezig) { planSync(); return; }
+  if (!getToken()) { zetStatus('telling', 'err', 'Geen token'); return false; }
+  if (!navigator.onLine) { zetStatus('telling', 'err', 'Offline'); return false; }
+  if (syncBezig) { planSync(); return false; }
   syncBezig = true;
   syncNodig = false;
-  zetStatus('busy', 'Sync…');
+  zetStatus('telling', 'busy', 'Sync…');
+  let gelukt = false;
+  let herkansMs = SYNC_HERKANS_MS;
   try {
-    // ophalen + samenvoegen (nieuwste timestamp wint per artikel)
+    const { tekst, sha } = await ghGetMetSha('telling.json');
     let remote = { items: {} };
-    let sha = null;
-    const raw = await ghGetRaw('telling.json');
-    if (raw !== null) {
-      const info = await ghDirInfo('telling.json');
-      sha = info ? info.sha : null;
-      try { remote = JSON.parse(raw); } catch (e) { remote = { items: {} }; }
+    if (tekst !== null) {
+      try { remote = JSON.parse(tekst); } catch (e) { remote = { items: {} }; }
       if (!remote.items) remote.items = {};
     }
-    let veranderd = false;
-    const samen = Object.assign({}, remote.items);
-    for (const [k, v] of Object.entries(telling.items)) {
-      if (!samen[k] || (v.ts || 0) > (samen[k].ts || 0)) { samen[k] = v; veranderd = true; }
+    // na "Controle afronden" (ook op een ander apparaat) vervallen de lokale regels
+    // die al in de cloud stonden: die zitten in het archief en mogen niet terug de
+    // lijst in. Wat dit apparaat daarna wijzigde, of nog niet had kunnen syncen,
+    // blijft staan. Vergeleken wordt met wat dit apparaat bij zijn vorige sync in de
+    // cloud zag (telling.cloud: ts per sleutel), dus niet met de klok van een ander
+    // apparaat. Zonder telling.cloud (eerste sync na de update naar v1.14): alles
+    // met een ts tot en met het afrondmoment vervalt.
+    const afgerond = remote.afgerond || 0;
+    if (afgerond && afgerond !== telling.afgerond) {
+      const cloud = telling.cloud;
+      for (const [k, v] of Object.entries(telling.items)) {
+        const stondInCloud = cloud ? (k in cloud && (v.ts || 0) <= cloud[k]) : (v.ts || 0) <= afgerond;
+        if (stondInCloud) delete telling.items[k];
+      }
+      telling.afgerond = afgerond;
     }
+    const { samen, veranderd } = mergeOpTs(telling.items, remote.items);
+    const opgeruimd = ruimGrafstenenOp(samen, it => it.del);
     telling.items = samen;
     bewaarTelling();
-    if (veranderd || raw === null) {
-      await ghPut('telling.json', JSON.stringify({ items: samen }), sha, 'Telling bijgewerkt via app');
+    if (veranderd || opgeruimd || tekst === null) {
+      const nieuw = { items: samen };
+      if (afgerond) nieuw.afgerond = afgerond;
+      tellingSha = await ghPut('telling.json', JSON.stringify(nieuw), sha, 'Telling bijgewerkt via app');
+    } else {
+      tellingSha = sha;
     }
-    zetStatus('ok', 'Gesynct');
+    // vastleggen wat er nu in de cloud staat (voor de afrond-controle hierboven)
+    telling.cloud = {};
+    for (const [k, v] of Object.entries(samen)) telling.cloud[k] = v.ts || 0;
+    bewaarTelling();
+    zetStatus('telling', 'ok', 'Gesynct');
+    gelukt = true;
   } catch (e) {
-    if (e.status === 409 || e.status === 422) { planSync(); }
-    else if (e.status === 401 || e.status === 403) { zetStatus('err', 'Token?'); }
-    else zetStatus('err', 'Sync-fout');
+    // de finally-tak plant de herkansing: snel na een conflict (409/422, een ander
+    // apparaat schreef net), rustiger na een netwerk- of serverfout
+    if (e.status === 409 || e.status === 422) herkansMs = SYNC_CONFLICT_MS;
+    if (e.status === 401 || e.status === 403) zetStatus('telling', 'err', 'Token?');
+    else zetStatus('telling', 'err', 'Sync-fout');
     syncNodig = true;
   } finally {
     syncBezig = false;
     renderAlles();
-    if (syncNodig && navigator.onLine) { clearTimeout(syncTimer); syncTimer = setTimeout(syncTelling, 8000); }
+    if (syncNodig && navigator.onLine) { clearTimeout(syncTimer); syncTimer = setTimeout(syncTelling, herkansMs); }
   }
+  return gelukt;
 }
 
-function zetStatus(soort, tekst) {
-  $('statusDot').className = 'status-dot ' + soort;
-  $('statusTxt').textContent = tekst;
+// statusbolletje rechtsboven. Artikellijst en telling-sync lopen tegelijk; elk
+// meldt zijn eigen stand. Zolang er één bezig is staat er "bezig", daarna wint
+// een fout (die blijft staan tot die taak weer lukt), anders de laatste melding.
+function zetStatus(taak, soort, tekst) {
+  statusPerTaak[taak] = { soort, tekst };
+  const standen = Object.values(statusPerTaak);
+  const toon = standen.find(s => s.soort === 'busy') || standen.find(s => s.soort === 'err') || { soort, tekst };
+  $('statusDot').className = 'status-dot ' + toon.soort;
+  $('statusTxt').textContent = toon.tekst;
 }
 
 // ---------- scanner ----------
-let camStream = null;
-let camActief = false;
-let zxingReader = null;
-let detectorLus = null;
-let audioCtx = null;
-let scanTriggerTot = 0;   // tot welk tijdstip (ms) er actief gescand wordt
-let triggerTimer = null;
-
 const TRIGGER_VENSTER = 2500; // ms zoeken na een druk op de scanknop
 
 function scanActief() { return camActief && Date.now() <= scanTriggerTot; }
@@ -301,7 +461,6 @@ function scanVakInVideo(video) {
 }
 
 // knip het scanvlak uit het huidige camerabeeld; de decoder ziet alleen dit stukje
-let scanCanvas = null;
 function pakScanBeeld(video) {
   const vak = scanVakInVideo(video);
   if (!vak) return null;
@@ -313,9 +472,19 @@ function pakScanBeeld(video) {
   return scanCanvas;
 }
 
+// audiocontext voor de piep. Op mobiel moet hij binnen een tik worden aangemaakt,
+// anders blijft hij stil: startScanner (na de tik op Scannen) is de echte plek,
+// piep() maakt hem alleen nog aan als vangnet (bijv. bij de handscanner)
+function zorgAudio() {
+  if (!audioCtx) {
+    try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { /* geen geluid */ }
+  }
+  return audioCtx;
+}
+
 function piep() {
   try {
-    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    zorgAudio();
     const o = audioCtx.createOscillator();
     const g = audioCtx.createGain();
     o.frequency.value = 1400;
@@ -334,9 +503,11 @@ async function startScanner() {
   $('camOverlay').classList.add('open');
   $('camOverlay').classList.remove('scanning');
   $('camMsg').textContent = 'Camera starten…';
-  if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
+  zorgAudio();
   const video = $('camVideo');
   try {
+    // zonder BarcodeDetector is ZXing nodig: eerst laden, dan pas de camera aan
+    if (!('BarcodeDetector' in window)) await laadZxing();
     camStream = await navigator.mediaDevices.getUserMedia({
       video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
       audio: false
@@ -395,7 +566,26 @@ async function startScanner() {
   }
 }
 
-function stopScanner() {
+// ZXing (330 kB) is alleen nodig op toestellen zonder BarcodeDetector en wordt
+// daarom pas geladen als de camera daar start. De service worker houdt hem in de
+// cache, dus ook offline beschikbaar.
+function laadZxing() {
+  if (window.ZXing) return Promise.resolve();
+  if (!zxingLaden) {
+    zxingLaden = new Promise((klaar, mis) => {
+      const s = document.createElement('script');
+      s.src = 'zxing.min.js';
+      s.onload = klaar;
+      s.onerror = () => { zxingLaden = null; mis(new Error('scanbibliotheek niet geladen')); };
+      document.head.appendChild(s);
+    });
+  }
+  return zxingLaden;
+}
+
+// geenReload: bij een geslaagde scan nog niet herladen voor een klaarstaande
+// update; dan doet sluitPaneel dat zodra het artikel weer dicht is
+function stopScanner(geenReload) {
   camActief = false;
   scanTriggerTot = 0;
   clearTimeout(triggerTimer);
@@ -406,7 +596,7 @@ function stopScanner() {
   if (camStream) { camStream.getTracks().forEach(t => t.stop()); camStream = null; }
   $('camVideo').srcObject = null;
   $('camOverlay').classList.remove('open');
-  if (updateWacht && $('artPanel').hidden) location.reload();
+  if (updateWacht && !geenReload && $('artPanel').hidden) location.reload();
 }
 
 async function wisselTorch() {
@@ -422,7 +612,7 @@ async function wisselTorch() {
 function verwerkScan(code) {
   if (!camActief) return;
   scanTriggerTot = 0;
-  stopScanner();
+  stopScanner(true);
   piep();
   zoekEnOpen(String(code).trim());
 }
@@ -433,11 +623,6 @@ function verwerkScan(code) {
 // gefocust met inputmode="none": de invoer komt aan, maar het schermtoetsenbord
 // blijft dicht. Elke invoer wordt na een korte pauze vanzelf gezocht. Met de
 // ⌨-knop pak je het toetsenbord er bewust bij (dan zoekt hij niet vanzelf).
-let hsBuffer = '';
-let hsTimer = null;
-let hsVeldTimer = null;
-let hsTypStand = false;   // ⌨-knop actief: gewoon typen, niet automatisch zoeken
-
 function handscannerAan() { return localStorage.getItem('mgz_handscanner') === '1'; }
 
 function pasHandscannerToe() {
@@ -471,9 +656,12 @@ function hsFocusVeld() {
   if (window.scrollX) window.scrollTo(0, window.scrollY);
 }
 
-function hsVerwerkVeld() {
+// één ingang voor een code van de handscanner, uit de zoekbalk of uit het vangnet
+function hsOpen(code) {
   clearTimeout(hsVeldTimer);
-  const code = $('zoekInput').value.trim();
+  clearTimeout(hsTimer);
+  hsBuffer = '';
+  code = String(code).trim();
   if (!code) return;
   $('zoekInput').value = '';
   $('zoekResultaten').innerHTML = '';
@@ -481,16 +669,8 @@ function hsVerwerkVeld() {
   zoekEnOpen(code);
 }
 
-function hsVerwerk() {
-  const code = hsBuffer.trim();
-  hsBuffer = '';
-  clearTimeout(hsTimer);
-  if (!code) return;
-  $('zoekInput').value = '';
-  piep();
-  zoekEnOpen(code);
-}
-
+// vangnet: heeft de zoekbalk even geen focus (bijv. net na het sluiten van een
+// sheet), dan vangen we de aanslagen van de scanner hier op en bouwen de code zelf op
 function hsKeydown(e) {
   if (!handscannerAan()) return;
   if (e.ctrlKey || e.altKey || e.metaKey) return;
@@ -499,7 +679,7 @@ function hsKeydown(e) {
   if (a && a.matches && a.matches('input, textarea, select')) return;
   if (document.querySelector('.overlay.open') || camActief) return;
   if (e.key === 'Enter') {
-    if (hsBuffer) { e.preventDefault(); hsVerwerk(); }
+    if (hsBuffer) { e.preventDefault(); hsOpen(hsBuffer); }
     return;
   }
   if (e.key.length !== 1) return;
@@ -507,7 +687,7 @@ function hsKeydown(e) {
   hsBuffer += e.key;
   $('zoekInput').value = hsBuffer;
   clearTimeout(hsTimer);
-  hsTimer = setTimeout(hsVerwerk, 300);
+  hsTimer = setTimeout(() => hsOpen(hsBuffer), 300);
 }
 
 // ---------- artikel zoeken & paneel ----------
@@ -518,8 +698,37 @@ function zoekEnOpen(code) {
     if (opArtNr) treffers = [opArtNr];
   }
   if (treffers.length > 1) { toonKiezer(treffers, code); return; }
-  if (treffers.length === 1) { openPaneel(treffers[0]); return; }
-  openPaneelOnbekend(code);
+  openPaneel(treffers.length ? treffers[0] : onbekendArtikel(code));
+}
+
+// een gescande code die niet in de artikellijst staat
+function onbekendArtikel(code) {
+  return { b: code, a: '', o: 'Onbekende code', c: '', f: '', h: '', l: '', v: '', onb: true };
+}
+// het artikel van een registratie of uitloopregel: het artikel met die barcode en
+// hetzelfde artikelnummer, anders het (eerste) artikel met die barcode; staat de
+// code (nog) niet in de artikellijst, dan een onbekend artikel
+function artikelVanRegistratie(it) {
+  const lijst = artIndex.get(it.b) || [];
+  if (!lijst.length) return onbekendArtikel(it.b);
+  return lijst.find(a => it.a && a.a === it.a)
+    // het artikel heeft intussen een andere barcode gekregen: op artikelnummer zoeken
+    || (it.a && artNrIndex.get(String(it.a).toUpperCase()))
+    || lijst[0];
+}
+
+// sleutel van een artikel in telling.items of rondje.uitloop: de barcode, of
+// barcode|artikelnummer als meerdere artikelen die barcode delen (anders
+// overschrijft de registratie van het ene artikel die van het andere).
+// Bestaande sleutels blijven geldig: staat er al iets onder barcode|artikelnummer,
+// of onder de kale barcode van dít artikel (van vóór v1.14), dan wordt die gebruikt.
+function sleutelVoor(art, opslag) {
+  if (art.onb || !art.a) return art.b;
+  const apart = art.b + '|' + art.a;
+  if (levend(opslag[apart])) return apart;
+  const kaal = levend(opslag[art.b]);
+  if (kaal && kaal.a === art.a) return art.b;
+  return (artIndex.get(art.b) || []).length > 1 ? apart : art.b;
 }
 
 function toonKiezer(treffers, code) {
@@ -531,65 +740,50 @@ function toonKiezer(treffers, code) {
     el.innerHTML = '<div class="mid"><div class="t1">' + esc(art.o) + '</div>' +
       '<div class="t2">' + esc(art.a) + ' · locatie ' + locHtml(art.l || '?') + '</div></div>' +
       '<div class="right"><span class="badge groen">' + esc(art.v) + '</span></div>';
-    el.onclick = () => { $('kiesOverlay').classList.remove('open'); openPaneel(art); };
+    el.onclick = () => { sluitSheet('kiesOverlay'); openPaneel(art); };
     div.appendChild(el);
   }
-  $('kiesOverlay').classList.add('open');
+  openSheet('kiesOverlay');
 }
 
-function openPaneel(art, behoudBlader) {
+// artikelpaneel openen; art.onb = gescande code die niet in de artikellijst staat
+// (dan een andere kop en grid en geen knop "Voorraad klopt"). key: de sleutel van
+// de registratie als die al bekend is (openen vanuit een lijst)
+function openPaneel(art, behoudBlader, key) {
   huidigArt = art;
-  huidigeKey = art.b;
+  huidigeKey = key || sleutelVoor(art, telling.items);
   const bestaand = levend(telling.items[huidigeKey]);
-  $('artKop').innerHTML =
-    '<div class="art-title">' + esc(art.o) + '</div>' +
-    '<div class="art-nr">' + esc(art.a) +
-    (bestaand ? ' <span class="badge groen">al geteld</span>' : '') +
-    (bestaand && bestaand.bsd ? ' <span class="badge geel">🛒 besteld</span>' : '') + '</div>';
-  $('artGrid').innerHTML =
-    veld('Locatie', esc(art.l || '–') +
-      (art.l && !locNotatieOk(art.l) ? ' <span class="badge geel" title="Hoort kast.plank.breedte(-diepte) te zijn">⚠ notatie</span>' : ''), 'big') +
-    veld('Tech. voorraad', esc(art.v || '0'), 'groen big') +
-    veld('Crediteur', esc(art.c || '–')) +
-    veld('Fabrikantcode', esc(art.f || '–') +
-      (art.f ? ' <button class="copy-mini" data-copy="' + esc(art.f) + '">⧉ kopieer</button>' : '')) +
-    veld('Hun nummer', art.h
-      ? '<span class="kopieer-waarde" data-copy="' + esc(art.h) + '">' + esc(art.h) + '</span>'
-      : '–') +
-    veld('Barcode', esc(art.b));
-  bindKopieKnoppen($('artGrid'));
+  const besteldBadge = bestaand && bestaand.bsd ? ' <span class="badge geel">🛒 besteld</span>' : '';
+  if (art.onb) {
+    $('artKop').innerHTML =
+      '<div class="art-title">Onbekende code <span class="badge rood">niet in artikellijst</span></div>' +
+      '<div class="art-nr">' + esc(art.b) + besteldBadge + '</div>';
+    $('artGrid').innerHTML = veld('Gescand', esc(art.b)) +
+      veld('Tip', 'Zet in de opmerking om welk artikel/vak het gaat');
+  } else {
+    $('artKop').innerHTML =
+      '<div class="art-title">' + esc(art.o) + '</div>' +
+      '<div class="art-nr">' + esc(art.a) +
+      (bestaand ? ' <span class="badge groen">al geteld</span>' : '') + besteldBadge + '</div>';
+    $('artGrid').innerHTML =
+      veld('Locatie', esc(art.l || '–') +
+        (art.l && !locNotatieOk(art.l) ? ' <span class="badge geel" title="Hoort kast.plank.breedte(-diepte) te zijn">⚠ notatie</span>' : ''), 'big') +
+      veld('Tech. voorraad', esc(art.v || '0'), 'groen big') +
+      veld('Crediteur', esc(art.c || '–')) +
+      veld('Fabrikantcode', esc(art.f || '–') +
+        (art.f ? ' <button class="copy-mini" data-copy="' + esc(art.f) + '">⧉ kopieer</button>' : '')) +
+      veld('Hun nummer', art.h
+        ? '<span class="kopieer-waarde" data-copy="' + esc(art.h) + '">' + esc(art.h) + '</span>'
+        : '–') +
+      veld('Barcode', esc(art.b));
+    bindKopieKnoppen($('artGrid'));
+  }
   $('inpGeteld').value = bestaand && bestaand.g != null ? bestaand.g : '';
   $('inpBestellen').value = bestaand && bestaand.best != null ? bestaand.best : '';
   $('inpOpmerking').value = bestaand ? (bestaand.opm || '') : '';
   zetActiefVeld('inpBestellen');
   $('btnVerwijder').hidden = !bestaand;
-  $('btnKlopt').hidden = false;
-  $('scanIdle').hidden = true;
-  $('artPanel').hidden = false;
-  updateUitloopUI();
-  if (!behoudBlader) bouwBlader();
-  updateBladerUI();
-  updateBesteldKnop();
-  toonView('scan');
-  window.scrollTo(0, 0);
-}
-
-function openPaneelOnbekend(code, behoudBlader) {
-  huidigArt = { b: code, a: '', o: 'Onbekende code', c: '', f: '', h: '', l: '', v: '', onb: true };
-  huidigeKey = code;
-  const bestaand = levend(telling.items[huidigeKey]);
-  $('artKop').innerHTML =
-    '<div class="art-title">Onbekende code <span class="badge rood">niet in artikellijst</span></div>' +
-    '<div class="art-nr">' + esc(code) +
-    (bestaand && bestaand.bsd ? ' <span class="badge geel">🛒 besteld</span>' : '') + '</div>';
-  $('artGrid').innerHTML = veld('Gescand', esc(code)) +
-    veld('Tip', 'Zet in de opmerking om welk artikel/vak het gaat');
-  $('inpGeteld').value = bestaand && bestaand.g != null ? bestaand.g : '';
-  $('inpBestellen').value = bestaand && bestaand.best != null ? bestaand.best : '';
-  $('inpOpmerking').value = bestaand ? (bestaand.opm || '') : '';
-  zetActiefVeld('inpBestellen');
-  $('btnVerwijder').hidden = !bestaand;
-  $('btnKlopt').hidden = true;
+  $('btnKlopt').hidden = !!art.onb;
   $('scanIdle').hidden = true;
   $('artPanel').hidden = false;
   updateUitloopUI();
@@ -602,12 +796,7 @@ function openPaneelOnbekend(code, behoudBlader) {
 
 function bindKopieKnoppen(container) {
   container.querySelectorAll('[data-copy]').forEach(btn => {
-    btn.onclick = () => {
-      const w = btn.getAttribute('data-copy');
-      navigator.clipboard.writeText(w)
-        .then(() => toast('Gekopieerd: ' + w))
-        .catch(() => toast('Kopiëren mislukt', true));
-    };
+    btn.onclick = () => kopieer(btn.getAttribute('data-copy'));
   });
 }
 
@@ -638,8 +827,7 @@ function blader(richting) {
 function openViaKey(key) {
   const it = levend(telling.items[key]);
   if (!it) { bouwBlader(); updateBladerUI(); return; }
-  const art = (artIndex.get(it.b) || [])[0];
-  if (art) openPaneel(art, true); else openPaneelOnbekend(it.b, true);
+  openPaneel(artikelVanRegistratie(it), true, key);
 }
 
 // ---------- besteld-markering ----------
@@ -677,7 +865,7 @@ function wisselBesteld() {
   bewaarTelling();
   planSync();
   renderAlles();
-  const rondjeNieuw = rondjeRegistreerScan(entry);
+  const rondjeNieuw = rondjeRegistreerScan(huidigeKey, entry);
   toast('🛒 ' + (huidigArt.a || huidigArt.b) + ' besteld' +
     (rondjeNieuw.length ? ' · 📍 ' + rondjeNieuw.join(', ') + ' ✓' : ''));
   if (bladerIdx >= 0 && bladerIdx < bladerKeys.length - 1) blader(1);
@@ -688,7 +876,7 @@ function wisselBesteld() {
 // artikelen die niet meer gebruikt worden: bij het scannen verschijnt een
 // melding, en de hele lijst staat onderaan het Overzicht
 function updateUitloopUI() {
-  const op = huidigeKey ? !!uitloopVan(huidigeKey) : false;
+  const op = huidigArt ? !!uitloopVanArtikel(huidigArt) : false;
   $('uitloopBanner').hidden = !op;
   $('btnUitloop').textContent = op ? '📉 Van lijst halen' : '📉 Uitloop';
 }
@@ -696,13 +884,14 @@ function updateUitloopUI() {
 function wisselUitloop() {
   if (!huidigArt) return;
   const b = huidigArt.b;
-  if (uitloopVan(b)) {
+  const key = sleutelVoor(huidigArt, rondje.uitloop);
+  if (uitloopVan(key)) {
     // tombstone i.p.v. echt wissen, anders komt het artikel bij de volgende sync terug
-    rondje.uitloop[b] = { ts: Date.now(), del: true };
+    rondje.uitloop[key] = { ts: Date.now(), del: true };
     toast((huidigArt.a || b) + ' van de uitlooplijst gehaald');
   } else {
     if (!confirm('Weet je zeker dat je ' + (huidigArt.a || b) + ' op de uitlooplijst wilt zetten?\n\nBij het scannen krijg je dan de melding dat dit artikel niet meer wordt aangevuld.')) return;
-    rondje.uitloop[b] = { a: huidigArt.a || '', o: huidigArt.o || '', l: huidigArt.l || '', ts: Date.now() };
+    rondje.uitloop[key] = { b, a: huidigArt.a || '', o: huidigArt.o || '', l: huidigArt.l || '', ts: Date.now() };
     toast('📉 ' + (huidigArt.a || b) + ' op de uitlooplijst gezet');
   }
   bewaarRondje();
@@ -712,7 +901,6 @@ function wisselUitloop() {
 }
 
 // ---------- geselecteerd telveld (− en + werken op dit veld) ----------
-let actiefVeld = 'inpGeteld';
 function zetActiefVeld(id) {
   actiefVeld = id;
   $('veldGeteld').classList.toggle('sel', id === 'inpGeteld');
@@ -725,10 +913,7 @@ function verwijderRegistratie() {
   if (!bestaand) return;
   const naam = huidigArt ? (huidigArt.a || huidigArt.b) : huidigeKey;
   if (!confirm(naam + ' uit de controle verwijderen?\n\nGeteld, bestellen en opmerking van dit artikel worden gewist (op alle apparaten).')) return;
-  // tombstone i.p.v. echt wissen, anders komt het item bij de volgende sync terug
-  telling.items[huidigeKey] = { b: bestaand.b, ts: Date.now(), del: true };
-  bewaarTelling();
-  planSync();
+  verwijderRegistraties([huidigeKey]);
   renderAlles();
   toast('🗑 ' + naam + ' uit de controle verwijderd');
   // binnen de huidige bladervolgorde doorschuiven naar het volgende artikel
@@ -737,6 +922,22 @@ function verwijderRegistratie() {
   if (bladerKeys.length) openViaKey(bladerKeys[Math.min(Math.max(idx, 0), bladerKeys.length - 1)]);
   else sluitPaneel();
 }
+
+// grafsteen i.p.v. echt wissen, anders komt de registratie bij de volgende sync terug
+function verwijderRegistraties(keys) {
+  const nu = Date.now();
+  for (const k of keys) {
+    const oud = telling.items[k];
+    telling.items[k] = { b: oud ? oud.b : k, ts: nu, del: true };
+  }
+  bewaarTelling();
+  planSync();
+}
+
+// systeemvoorraad als getal (de export levert hem als tekst)
+function systeemVoorraad(it) { return parseInt(it.v, 10) || 0; }
+// telverschil: geteld wijkt af van de systeemvoorraad (onbekende codes tellen niet mee)
+function heeftVerschil(it) { return !it.onb && it.g != null && Number(it.g) !== systeemVoorraad(it); }
 
 function veld(lbl, val, klasse) {
   return '<div class="art-field"><div class="lbl">' + lbl + '</div><div class="val ' + (klasse || '') + '">' + val + '</div></div>';
@@ -762,7 +963,7 @@ function bouwEntry(kloptDirect) {
   const art = huidigArt;
   const entry = {
     b: art.b, a: art.a, o: art.o, c: art.c, f: art.f, h: art.h, l: art.l, v: art.v,
-    g: kloptDirect ? (parseInt(art.v, 10) || 0) : leesGetal('inpGeteld'),
+    g: kloptDirect ? systeemVoorraad(art) : leesGetal('inpGeteld'),
     best: leesGetal('inpBestellen'),
     opm: $('inpOpmerking').value.trim(),
     ts: Date.now()
@@ -792,7 +993,7 @@ function slaOp(kloptDirect) {
   bewaarTelling();
   planSync();
   const naam = art.a || art.b;
-  const rondjeNieuw = rondjeRegistreerScan(entry);
+  const rondjeNieuw = rondjeRegistreerScan(huidigeKey, entry);
   const extra = rondjeNieuw.length ? ' · 📍 ' + rondjeNieuw.join(', ') + ' ✓' : '';
   toast(kloptDirect ? ('✓ ' + naam + ' klopt (' + entry.g + ')' + extra) : ('✓ ' + naam + ' opgeslagen' + extra));
   sluitPaneel();
@@ -814,9 +1015,7 @@ function handmatigZoeken() {
   if (opNr && !res.includes(opNr)) res.push(opNr);
   if (!res.length && q.length >= 2) {
     for (const art of artikelen) {
-      if (art.o.toUpperCase().includes(qU) || art.a.toUpperCase().includes(qU) ||
-          art.f.toUpperCase().includes(qU) || art.h.toUpperCase().includes(qU) ||
-          art.b.includes(q) || art.l.toUpperCase().includes(qU)) {
+      if (art._zoek.includes(qU)) {
         res.push(art);
         if (res.length >= 40) break;
       }
@@ -839,14 +1038,13 @@ function handmatigZoeken() {
 
 // ---------- lijst-weergave ----------
 function maakLijstItem(it) {
-  const verschil = it.g != null && String(it.g) !== String(parseInt(it.v, 10) || 0);
   let badgeHtml = '';
   if (it.onb) badgeHtml = '<span class="badge rood">onbekend</span>';
-  else if (verschil) badgeHtml = '<span class="badge rood">' + it.g + ' i.p.v. ' + (parseInt(it.v, 10) || 0) + '</span>';
-  else if (it.g != null) badgeHtml = '<span class="badge groen">✓ ' + it.g + '</span>';
-  if (it.bsd) badgeHtml += ' <span class="badge groen">🛒 besteld' + (it.best > 0 ? ' ' + it.best : '') + '</span>';
-  else if (it.best != null && it.best > 0) badgeHtml += ' <span class="badge geel">bestel ' + it.best + '</span>';
-  if (uitloopVan(it.b)) badgeHtml = '<span class="badge rood">📉 uitloop</span> ' + badgeHtml;
+  else if (heeftVerschil(it)) badgeHtml = '<span class="badge rood">' + esc(it.g) + ' i.p.v. ' + systeemVoorraad(it) + '</span>';
+  else if (it.g != null) badgeHtml = '<span class="badge groen">✓ ' + esc(it.g) + '</span>';
+  if (it.bsd) badgeHtml += ' <span class="badge groen">🛒 besteld' + (it.best > 0 ? ' ' + esc(it.best) : '') + '</span>';
+  else if (it.best != null && it.best > 0) badgeHtml += ' <span class="badge geel">bestel ' + esc(it.best) + '</span>';
+  if (uitloopVanArtikel(artikelVanRegistratie(it))) badgeHtml = '<span class="badge rood">📉 uitloop</span> ' + badgeHtml;
   const el = document.createElement('div');
   el.className = 'item' + (it.kl ? ' klaar' : '');
   el.innerHTML = '<input type="checkbox" class="lijst-klaar" aria-label="Klaar"' + (it.kl ? ' checked' : '') + '>' +
@@ -855,15 +1053,12 @@ function maakLijstItem(it) {
     (it.opm ? ' · 💬 ' + esc(it.opm) : '') + '</div></div>' +
     '<div class="right">' + badgeHtml + '</div>' +
     (it.kl ? '<button class="lijst-del" aria-label="Verwijderen">✕</button>' : '');
-  el.onclick = () => {
-    const art = (artIndex.get(it.b) || [])[0];
-    if (art) openPaneel(art); else openPaneelOnbekend(it.b);
-  };
+  el.onclick = () => openPaneel(artikelVanRegistratie(it), false, it.key);
   // afvinken: item wordt als "klaar" gemarkeerd en zakt naar de klaar-sectie
   const cb = el.querySelector('.lijst-klaar');
   cb.onclick = (e) => e.stopPropagation();
   cb.onchange = () => {
-    const item = levend(telling.items[it.b]);
+    const item = levend(telling.items[it.key]);
     if (!item) return;
     if (cb.checked) item.kl = Date.now(); else delete item.kl;
     item.ts = Date.now();
@@ -874,26 +1069,34 @@ function maakLijstItem(it) {
   const del = el.querySelector('.lijst-del');
   if (del) del.onclick = (e) => {
     e.stopPropagation();
-    // tombstone i.p.v. echt wissen, anders komt het item bij de volgende sync terug
-    telling.items[it.b] = { b: it.b, ts: Date.now(), del: true };
-    bewaarTelling();
-    planSync();
+    verwijderRegistraties([it.key]);
     renderAlles();
     toast('🗑 ' + (it.a || it.b) + ' uit de controle verwijderd');
   };
   return el;
 }
 
+// levende registraties als kopie met hun sleutel erbij (it.key), voor lijsten,
+// tabellen en de CSV; wijzigen gaat altijd via telling.items[it.key]
+function registraties() {
+  return Object.entries(telling.items).filter(([, it]) => !it.del).map(([key, it]) => Object.assign({ key }, it));
+}
+
+function updateNavBadge() {
+  const n = Object.values(telling.items).filter(it => !it.del).length;
+  const badge = $('navBadge');
+  badge.hidden = !n;
+  badge.textContent = n;
+}
+
 function renderLijst() {
-  const items = Object.values(telling.items).filter(it => !it.del).sort((a, b2) => (b2.ts || 0) - (a.ts || 0));
+  const items = registraties().sort((a, b2) => (b2.ts || 0) - (a.ts || 0));
   const actief = items.filter(it => !it.kl);
   const klaar = items.filter(it => it.kl);
   $('lijstSub').textContent = items.length
     ? items.length + ' artikelen geregistreerd' + (klaar.length ? ' · ' + klaar.length + ' klaar' : '')
     : 'Nog niets gescand';
-  const badge = $('navBadge');
-  badge.hidden = !items.length;
-  badge.textContent = items.length;
+  updateNavBadge();
   const div = $('lijstItems');
   div.innerHTML = '';
   if (!items.length) {
@@ -908,10 +1111,7 @@ function renderLijst() {
       '<button class="btn stil klein" id="btnWisKlaar">🗑 Verwijder afgevinkte</button>';
     kop.querySelector('#btnWisKlaar').onclick = () => {
       if (!confirm(klaar.length + ' afgevinkte artikel(en) uit de controle verwijderen?\n\nGeteld, bestellen en opmerkingen van deze artikelen worden gewist (op alle apparaten).')) return;
-      const nu = Date.now();
-      for (const it of klaar) telling.items[it.b] = { b: it.b, ts: nu, del: true };
-      bewaarTelling();
-      planSync();
+      verwijderRegistraties(klaar.map(it => it.key));
       renderAlles();
       toast('🗑 ' + klaar.length + ' artikel(en) uit de controle verwijderd');
     };
@@ -924,16 +1124,9 @@ function renderLijst() {
 // crediteur van een regel: de waarde uit de actuele artikellijst wint, zodat
 // eerder gescande regels de volledige naam tonen zodra die lijst is ververst
 function credVan(it) {
-  const art = (artIndex.get(it.b) || [])[0];
-  return (art && art.c) || it.c || '';
+  return artikelVanRegistratie(it).c || it.c || '';
 }
 
-// filter via de vier tegels bovenaan; null = de gebruikelijke drie secties
-let ovFilter = null;
-
-// ingeklapte leveranciersblokken in het besteloverzicht (per apparaat onthouden)
-let ovDicht = new Set();
-try { ovDicht = new Set(JSON.parse(localStorage.getItem('mgz_ov_dicht') || '[]')); } catch (e) { }
 function bewaarOvDicht() { localStorage.setItem('mgz_ov_dicht', JSON.stringify(Array.from(ovDicht))); }
 
 function zetOvFilter(sectie) {
@@ -967,9 +1160,16 @@ function koppelOverzichtRijen(container) {
   });
 }
 
+// artikelcel in de overzichtstabellen: nummer vet met de omschrijving eronder;
+// kopieerbaar = tik op het nummer kopieert het (besteltabel)
+function artikelCel(nr, oms, kopieerbaar) {
+  return '<td><b' + (kopieerbaar ? ' class="art-kopie" data-kopieer="' + esc(nr) + '"' : '') + '>' + esc(nr) +
+    '</b><br><span class="muted">' + esc(oms) + '</span></td>';
+}
+
 function renderOverzicht() {
-  const items = Object.values(telling.items).filter(it => !it.del);
-  const verschillen = items.filter(it => !it.onb && it.g != null && it.g !== (parseInt(it.v, 10) || 0));
+  const items = registraties();
+  const verschillen = items.filter(heeftVerschil);
   const bestellen = items.filter(it => it.best != null && it.best > 0);
   const opmerkingen = items.filter(it => it.opm);
   const geteld = items.filter(it => it.g != null);
@@ -996,12 +1196,10 @@ function renderOverzicht() {
     $('ovGeteld').innerHTML = '<div class="leeg-melding">Nog niets geteld</div>';
   } else {
     let h = '<table><tr><th>Artikel</th><th>Locatie</th><th class="num">Systeem</th><th class="num">Geteld</th></tr>';
-    for (const it of geteld.sort((a, b) => (a.l || '').localeCompare(b.l || ''))) {
-      const sys = parseInt(it.v, 10) || 0;
-      const afwijkend = !it.onb && it.g !== sys;
-      h += '<tr data-key="' + esc(it.b) + '"><td><b>' + esc(it.a || it.b) + '</b><br><span style="color:var(--muted)">' + esc(it.o) + '</span></td>' +
-        '<td>' + locHtml(it.l) + '</td><td class="num">' + (it.onb ? '–' : sys) + '</td>' +
-        '<td class="num" style="font-weight:600' + (afwijkend ? ';color:var(--red)' : ';color:var(--green)') + '">' + it.g + '</td></tr>';
+    for (const it of geteld.sort((a, b) => vergelijkLoc(a.l, b.l))) {
+      h += '<tr data-key="' + esc(it.key) + '">' + artikelCel(it.a || it.b, it.o) +
+        '<td>' + locHtml(it.l) + '</td><td class="num">' + (it.onb ? '–' : systeemVoorraad(it)) + '</td>' +
+        '<td class="num ' + (heeftVerschil(it) ? 'afwijkend' : 'klopt') + '">' + esc(it.g) + '</td></tr>';
     }
     $('ovGeteld').innerHTML = h + '</table>';
     koppelOverzichtRijen($('ovGeteld'));
@@ -1012,12 +1210,12 @@ function renderOverzicht() {
     $('ovVerschillen').innerHTML = '<div class="leeg-melding">Geen telverschillen 🎉</div>';
   } else {
     let h = '<table><tr><th>Artikel</th><th>Locatie</th><th class="num">Systeem</th><th class="num">Geteld</th><th class="num">Verschil</th></tr>';
-    for (const it of verschillen.sort((a, b) => (a.l || '').localeCompare(b.l || ''))) {
-      const sys = parseInt(it.v, 10) || 0;
-      const d = it.g - sys;
-      h += '<tr data-key="' + esc(it.b) + '"><td><b>' + esc(it.a) + '</b><br><span style="color:var(--muted)">' + esc(it.o) + '</span></td>' +
-        '<td>' + locHtml(it.l) + '</td><td class="num">' + sys + '</td><td class="num">' + it.g + '</td>' +
-        '<td class="num" style="color:var(--red);font-weight:600">' + (d > 0 ? '+' : '') + d + '</td></tr>';
+    for (const it of verschillen.sort((a, b) => vergelijkLoc(a.l, b.l))) {
+      const sys = systeemVoorraad(it);
+      const d = Number(it.g) - sys;
+      h += '<tr data-key="' + esc(it.key) + '">' + artikelCel(it.a || it.b, it.o) +
+        '<td>' + locHtml(it.l) + '</td><td class="num">' + sys + '</td><td class="num">' + esc(it.g) + '</td>' +
+        '<td class="num afwijkend">' + (d > 0 ? '+' : '') + d + '</td></tr>';
     }
     $('ovVerschillen').innerHTML = h + '</table>';
     koppelOverzichtRijen($('ovVerschillen'));
@@ -1046,11 +1244,11 @@ function renderOverzicht() {
         h += '<div class="tabel-wrap"><table class="bestel-tabel"><tr><th>Artikel</th><th>Hun nummer</th><th>Locatie</th><th class="num">Aantal</th><th>Besteld</th></tr>';
         for (const it of regels) {
           const hun = it.h || it.f || '';
-          h += '<tr data-key="' + esc(it.b) + '"' + (it.bsd ? ' class="rij-besteld"' : '') + '><td><b class="art-kopie" data-kopieer="' + esc(it.a || it.b) + '">' + esc(it.a || it.b) + '</b><br><span style="color:var(--muted)">' + esc(it.o) + '</span></td>' +
+          h += '<tr data-key="' + esc(it.key) + '"' + (it.bsd ? ' class="rij-besteld"' : '') + '>' + artikelCel(it.a || it.b, it.o, true) +
             (hun ? '<td class="hun-kopie" data-kopieer="' + esc(hun) + '">' + esc(hun) + '</td>' : '<td>–</td>') + '<td>' + locHtml(it.l) + '</td>' +
-            '<td class="num"><input type="text" class="ov-aantal" data-key="' + esc(it.b) + '" inputmode="numeric" maxlength="4" value="' + it.best + '"></td>' +
-            '<td class="besteld-cel"><input type="checkbox" class="ov-besteld" data-key="' + esc(it.b) + '"' + (it.bsd ? ' checked' : '') + '>' +
-            '<input type="text" class="ov-ink" data-key="' + esc(it.b) + '" inputmode="numeric" maxlength="8" value="' + esc(it.ink || '') + '"></td></tr>';
+            '<td class="num"><input type="text" class="ov-aantal" data-key="' + esc(it.key) + '" inputmode="numeric" maxlength="4" value="' + esc(it.best) + '"></td>' +
+            '<td class="besteld-cel"><input type="checkbox" class="ov-besteld" data-key="' + esc(it.key) + '"' + (it.bsd ? ' checked' : '') + '>' +
+            '<input type="text" class="ov-ink" data-key="' + esc(it.key) + '" inputmode="numeric" maxlength="8" value="' + esc(it.ink || '') + '"></td></tr>';
         }
         h += '</table></div>';
       }
@@ -1071,9 +1269,7 @@ function renderOverzicht() {
     $('ovBestellen').querySelectorAll('[data-kopieer]').forEach(el => {
       el.onclick = (e) => {
         e.stopPropagation();
-        navigator.clipboard.writeText(el.getAttribute('data-kopieer'))
-          .then(() => toast('Gekopieerd: ' + el.getAttribute('data-kopieer')))
-          .catch(() => toast('Kopiëren mislukt', true));
+        kopieer(el.getAttribute('data-kopieer'));
       };
     });
     // aantal, besteld-vinkje en inkoopnummer direct in de tabel bewerken
@@ -1127,7 +1323,7 @@ function renderOverzicht() {
   } else {
     let h = '<table><tr><th>Artikel</th><th>Locatie</th><th>Opmerking</th></tr>';
     for (const it of opmerkingen) {
-      h += '<tr data-key="' + esc(it.b) + '"><td><b>' + esc(it.a || it.b) + '</b><br><span style="color:var(--muted)">' + esc(it.o) + '</span></td>' +
+      h += '<tr data-key="' + esc(it.key) + '">' + artikelCel(it.a || it.b, it.o) +
         '<td>' + locHtml(it.l) + '</td><td>' + esc(it.opm) + '</td></tr>';
     }
     $('ovOpmerkingen').innerHTML = h + '</table>';
@@ -1137,49 +1333,40 @@ function renderOverzicht() {
   // uitloop — artikelen die niet meer gebruikt worden en gaan verdwijnen;
   // altijd de complete lijst, ook via de tegel bovenin te openen
   const uitloopItems = Object.entries(rondje.uitloop || {}).filter(x => !x[1].del)
-    .sort((a, b) => String(a[1].l || '').localeCompare(String(b[1].l || ''), undefined, { numeric: true }));
+    .sort((a, b) => vergelijkLoc(a[1].l, b[1].l));
   $('kaartUitloop').hidden = !(ovFilter === 'uitloop' || (ovFilter === null && uitloopItems.length > 0));
   if (!uitloopItems.length) {
     $('ovUitloop').innerHTML = '<div class="leeg-melding">Niets gemarkeerd als uitloop</div>';
   } else {
     let h = '<table><tr><th>Artikel</th><th>Locatie</th><th>Op de lijst sinds</th></tr>';
     for (const [b, u] of uitloopItems) {
-      h += '<tr data-b="' + esc(b) + '"><td><b>' + esc(u.a || b) + '</b><br><span style="color:var(--muted)">' + esc(u.o || '') + '</span></td>' +
+      h += '<tr data-uitloop="' + esc(b) + '">' + artikelCel(u.a || u.b || b, u.o) +
         '<td>' + locHtml(u.l) + '</td><td>' + esc(fmtDatum.format(u.ts)) + '</td></tr>';
     }
     $('ovUitloop').innerHTML = h + '</table>';
-    $('ovUitloop').querySelectorAll('tr[data-b]').forEach(r => {
+    $('ovUitloop').querySelectorAll('tr[data-uitloop]').forEach(r => {
       r.onclick = () => {
-        const b = r.getAttribute('data-b');
-        const art = (artIndex.get(b) || [])[0];
-        if (art) openPaneel(art); else openPaneelOnbekend(b);
+        const key = r.getAttribute('data-uitloop');
+        const u = rondje.uitloop[key];
+        // u.b ontbreekt bij regels van vóór v1.14: daar is de sleutel de barcode
+        openPaneel(artikelVanRegistratie({ b: u.b || key, a: u.a }));
       };
     });
   }
 }
 
-function downloadCsv() {
-  const items = Object.values(telling.items).filter(it => !it.del).sort((a, b) => (a.l || '').localeCompare(b.l || ''));
+function downloadScanlijst() {
+  const items = registraties().sort((a, b) => vergelijkLoc(a.l, b.l));
   if (!items.length) { toast('Nog niets geteld', true); return; }
   const kol = ['Barcode','Artikelnummer','Korte omschrijving','Fabrikantcode','Hun nummer','Locatie','Locatienotatie','Tech. Voorraad','Geteld','Crediteur','Bestellen','Besteld','Inkoopnummer','Uitloop','Opmerking'];
-  const cel = (v) => {
-    v = String(v == null ? '' : v);
-    return /[;"\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
-  };
   const regels = [kol.join(';')];
   for (const it of items) {
-    regels.push([it.b, it.a, it.o, it.f, it.h, it.l,
+    regels.push(csvRegel([it.b, it.a, it.o, it.f, it.h, it.l,
       it.l && !locNotatieOk(it.l) ? 'afwijkend' : '', it.v,
       it.g != null ? it.g : '', credVan(it), it.best != null ? it.best : '',
-      it.bsd ? 'ja' : '', it.ink || '', uitloopVan(it.b) ? 'ja' : '', it.opm].map(cel).join(';'));
+      it.bsd ? 'ja' : '', it.ink || '', uitloopVanArtikel(artikelVanRegistratie(it)) ? 'ja' : '', it.opm]));
   }
-  const blob = new Blob(['﻿' + regels.join('\r\n')], { type: 'text/csv;charset=utf-8' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  const d = new Date();
-  a.download = 'Scanlijst ' + d.toISOString().slice(0, 10) + '.csv';
-  a.click();
-  URL.revokeObjectURL(a.href);
+  downloadCsv('Scanlijst ' + new Date().toISOString().slice(0, 10) + '.csv', regels);
 }
 
 // ---------- telling afronden ----------
@@ -1189,34 +1376,58 @@ async function rondAf() {
   if (!confirm('Controle afronden?\n\n' + n + ' regels worden gearchiveerd in de cloud en de lijst wordt leeggemaakt.')) return;
   if (!getToken() || !navigator.onLine) { toast('Afronden kan alleen online', true); return; }
   try {
-    zetStatus('busy', 'Archiveren…');
-    await syncTellingDirect();
-    const d = new Date();
-    const stamp = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' +
-      String(d.getDate()).padStart(2, '0') + '_' + String(d.getHours()).padStart(2, '0') +
-      String(d.getMinutes()).padStart(2, '0');
-    const archiefItems = {};
-    for (const [k, v] of Object.entries(telling.items)) { if (!v.del) archiefItems[k] = v; }
-    await ghPut('archief/telling-' + stamp + '.json', JSON.stringify({ afgerond: d.toISOString(), items: archiefItems }), null, 'Telling afgerond');
-    const info = await ghDirInfo('telling.json');
-    await ghPut('telling.json', JSON.stringify({ items: {} }), info ? info.sha : null, 'Telling geleegd na afronden');
-    telling = { items: {} };
-    bewaarTelling();
-    renderAlles();
-    zetStatus('ok', 'Gesynct');
-    toast('Controle gearchiveerd en leeggemaakt');
+    zetStatus('telling', 'busy', 'Archiveren…');
+    // eerst alles van de andere apparaten binnenhalen; lukt dat niet, dan niets
+    // archiveren en niets wissen (anders gaan hun registraties verloren)
+    if (!await syncTellingDirect()) {
+      toast('Afronden afgebroken: sync mislukt — er is niets gewist', true);
+      return;
+    }
+    // vanaf hier geen gewone sync tussendoor: die zou de lijst en tellingSha kunnen
+    // verversen met regels die dan niet in het archief komen
+    syncBezig = true;
+    try {
+      const archiefItems = {};
+      for (const [k, v] of Object.entries(telling.items)) { if (!v.del) archiefItems[k] = v; }
+      if (!Object.keys(archiefItems).length) {
+        zetStatus('telling', 'ok', 'Gesynct');
+        toast('De controle is al leeg — waarschijnlijk net afgerond op een ander apparaat');
+        return;
+      }
+      zetStatus('telling', 'busy', 'Archiveren…');
+      const d = new Date();
+      // met seconden, zodat een nieuwe poging na een mislukt leegmaken niet botst met het archief van zonet
+      const pad = 'archief/telling-' + stempelId(d) + String(d.getSeconds()).padStart(2, '0') + '.json';
+      await ghPut(pad, JSON.stringify({ afgerond: d.toISOString(), items: archiefItems }), null, 'Telling afgerond');
+      // sha van de sync hierboven: schreef een ander apparaat intussen nog iets,
+      // dan weigert GitHub (409) en wordt er niets gewist wat niet gearchiveerd is.
+      // afgerond: andere apparaten laten hun regels van vóór dit moment vallen
+      tellingSha = await ghPut('telling.json', JSON.stringify({ items: {}, afgerond: d.getTime() }), tellingSha, 'Telling geleegd na afronden');
+      telling = { items: {}, afgerond: d.getTime(), cloud: {} };
+      bewaarTelling();
+      renderAlles();
+      zetStatus('telling', 'ok', 'Gesynct');
+      toast('Controle gearchiveerd en leeggemaakt');
+    } finally {
+      syncBezig = false;
+    }
   } catch (e) {
-    zetStatus('err', 'Fout');
+    zetStatus('telling', 'err', 'Fout');
     toast('Afronden mislukt: ' + e.message, true);
   }
 }
 
+// wacht tot een lopende sync klaar is en synct dan zelf; geeft true als dat lukte
 async function syncTellingDirect() {
-  // synchroon wachten tot de lopende sync klaar is
   clearTimeout(syncTimer);
   while (syncBezig) await new Promise(r => setTimeout(r, 200));
-  await syncTelling();
-  while (syncBezig) await new Promise(r => setTimeout(r, 200));
+  return await syncTelling();
+}
+
+// tijdstempel-id jjjj-mm-dd_uumm (archiefnamen en rondje-id's)
+function stempelId(d) {
+  const p = (n) => String(n).padStart(2, '0');
+  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + '_' + p(d.getHours()) + p(d.getMinutes());
 }
 
 // ---------- wekelijks rondje ----------
@@ -1227,14 +1438,6 @@ async function syncTellingDirect() {
 //             'skip' (deze ronde overgeslagen), 'reset' (tombstone: vinkje weggehaald)
 // historie: compacte samenvattingen per rondje; het volledige rapport (incl. alle
 //           scans) staat in archief/rondje-<id>.json en wordt op verzoek opgehaald
-let rondje = { route: {}, actief: null, historie: [], archiefWacht: [] };
-let rondjeSyncTimer = null;
-let rondjeSyncBezig = false;
-let rondjeSyncNodig = false;
-let routeSheetId = null;
-let checkSheetId = null;
-let histCsvData = null;
-
 const fmtDatum = new Intl.DateTimeFormat('nl-NL', { weekday: 'short', day: 'numeric', month: 'short' });
 const fmtTijd = new Intl.DateTimeFormat('nl-NL', { hour: '2-digit', minute: '2-digit' });
 
@@ -1255,8 +1458,16 @@ function laadRondjeLokaal() {
   if (!rondje.uitloop) rondje.uitloop = {};
 }
 
-function uitloopVan(b) { return levend(rondje.uitloop[b]); }
+function uitloopVan(key) { return levend(rondje.uitloop[key]); }
+function uitloopVanArtikel(art) { return uitloopVan(sleutelVoor(art, rondje.uitloop)); }
 function bewaarRondje() { localStorage.setItem('mgz_rondje', JSON.stringify(rondje)); }
+// na een wijziging aan het rondje: lokaal bewaren, sync plannen en het scherm
+// bijwerken (updateRondjeUI rendert ook het Rondje-tabblad als dat open staat)
+function rondjeGewijzigd() {
+  bewaarRondje();
+  planRondjeSync();
+  updateRondjeUI();
+}
 
 // locaties: kast.plank.breedte[-diepte] — een route-item dekt alles wat eronder valt
 function locSegmenten(l) {
@@ -1276,7 +1487,7 @@ function locValtBinnen(routeLoc, artLoc) {
 function routeItems() {
   // natuurlijk oplopend op locatie: 2.4 vóór 11, 21.2 vóór 21.10, letters alfabetisch
   return Object.entries(rondje.route).filter(x => !x[1].del)
-    .sort((a, b) => String(a[1].loc).localeCompare(String(b[1].loc), undefined, { numeric: true, sensitivity: 'base' }));
+    .sort((a, b) => vergelijkLoc(a[1].loc, b[1].loc));
 }
 // een check met w:'reset' is een tombstone (vinkje weggehaald) en telt als "geen check"
 function checkVan(act, id) {
@@ -1312,14 +1523,10 @@ function planRondjeSync() {
 
 function mergeRondje(remote) {
   if (!remote) return;
-  const route = Object.assign({}, remote.route || {});
-  for (const [k, v] of Object.entries(rondje.route)) {
-    if (!route[k] || (v.ts || 0) > (route[k].ts || 0)) route[k] = v;
-  }
-  const uitloop = Object.assign({}, remote.uitloop || {});
-  for (const [k, v] of Object.entries(rondje.uitloop || {})) {
-    if (!uitloop[k] || (v.ts || 0) > (uitloop[k].ts || 0)) uitloop[k] = v;
-  }
+  const route = mergeOpTs(rondje.route, remote.route).samen;
+  const uitloop = mergeOpTs(rondje.uitloop, remote.uitloop).samen;
+  ruimGrafstenenOp(route, r => r.del);
+  ruimGrafstenenOp(uitloop, u => u.del);
   const histMap = new Map();
   for (const h of (remote.historie || [])) histMap.set(h.id, h);
   for (const h of rondje.historie) if (!histMap.has(h.id)) histMap.set(h.id, h);
@@ -1334,16 +1541,12 @@ function mergeRondje(remote) {
   const A = geldig(rondje.actief), B = geldig(remote.actief);
   let actief = A || B;
   if (A && B) {
-    const checks = Object.assign({}, B.checks || {});
-    for (const [k, v] of Object.entries(A.checks || {})) {
-      if (!checks[k] || (v.ts || 0) > (checks[k].ts || 0)) checks[k] = v;
-    }
-    const scans = Object.assign({}, B.scans || {});
-    for (const [k, v] of Object.entries(A.scans || {})) {
-      if (!scans[k] || (v.ts || 0) > (scans[k].ts || 0)) scans[k] = v;
-    }
+    const checks = mergeOpTs(A.checks, B.checks).samen;
+    const scans = mergeOpTs(A.scans, B.scans).samen;
     actief = { gestart: Math.min(A.gestart, B.gestart), checks, scans };
   }
+  // vinkje-grafstenen (w:'reset') alleen bij een rondje dat ongewoon lang openstaat
+  if (actief && actief.checks) ruimGrafstenenOp(actief.checks, c => c.w === 'reset');
   // uitzonderingen- en gebiedenlijst: de laatst opgeslagen versie wint in zijn geheel
   const locUitz = (!remote.locUitz || (rondje.locUitz && (rondje.locUitz.ts || 0) >= (remote.locUitz.ts || 0)))
     ? rondje.locUitz : remote.locUitz;
@@ -1357,13 +1560,11 @@ async function syncRondje() {
   if (rondjeSyncBezig) { planRondjeSync(); return; }
   rondjeSyncBezig = true;
   rondjeSyncNodig = false;
+  let herkansMs = SYNC_HERKANS_MS;
   try {
-    let sha = null;
-    const raw = await ghGetRaw('rondje.json');
+    const { tekst: raw, sha } = await ghGetMetSha('rondje.json');
     let remote = null;
     if (raw !== null) {
-      const info = await ghDirInfo('rondje.json');
-      sha = info ? info.sha : null;
       try { remote = JSON.parse(raw); } catch (e) { remote = null; }
     }
     mergeRondje(remote);
@@ -1387,14 +1588,15 @@ async function syncRondje() {
     }
     bewaarRondje();
   } catch (e) {
-    if (e.status === 409 || e.status === 422) planRondjeSync();
-    else rondjeSyncNodig = true;
+    // de finally-tak plant de herkansing (snel na een conflict, zie syncTelling)
+    if (e.status === 409 || e.status === 422) herkansMs = SYNC_CONFLICT_MS;
+    rondjeSyncNodig = true;
   } finally {
     rondjeSyncBezig = false;
     updateRondjeUI();
     if (rondjeSyncNodig && navigator.onLine) {
       clearTimeout(rondjeSyncTimer);
-      rondjeSyncTimer = setTimeout(syncRondje, 8000);
+      rondjeSyncTimer = setTimeout(syncRondje, herkansMs);
     }
   }
 }
@@ -1403,10 +1605,10 @@ async function syncRondje() {
 // aangeroepen bij elke opgeslagen registratie (opslaan / klopt / besteld):
 // logt de scan bij het lopende rondje en vinkt passende route-locaties af.
 // geeft de namen van nieuw afgevinkte locaties terug (voor in de toast).
-function rondjeRegistreerScan(entry) {
+function rondjeRegistreerScan(key, entry) {
   const act = rondje.actief;
   if (!act) return [];
-  act.scans[entry.b] = {
+  act.scans[key] = {
     ts: entry.ts, b: entry.b, a: entry.a || '', o: entry.o || '', l: entry.l || '',
     g: entry.g != null ? entry.g : null, best: entry.best != null ? entry.best : null,
     opm: entry.opm || '', bsd: entry.bsd ? 1 : 0
@@ -1426,9 +1628,7 @@ function rondjeRegistreerScan(entry) {
       }
     }
   }
-  bewaarRondje();
-  planRondjeSync();
-  updateRondjeUI();
+  rondjeGewijzigd();
   // even wachten met auto-afronden zodat de opslaan-toast niet ondersneeuwt
   setTimeout(controleerAutoAfronden, 700);
   return nieuw;
@@ -1450,10 +1650,7 @@ function rondjeStart() {
   if (rondje.actief) return;
   if (!routeItems().length) { toast('Voeg eerst locaties toe aan de route', true); return; }
   rondje.actief = { gestart: Date.now(), checks: {}, scans: {} };
-  bewaarRondje();
-  planRondjeSync();
-  renderRondje();
-  updateRondjeUI();
+  rondjeGewijzigd();
   toast('▶ Rondje gestart — scan zoals altijd, locaties vinken vanzelf af');
 }
 
@@ -1461,10 +1658,7 @@ function rondjeAnnuleer() {
   if (!rondje.actief) return;
   if (!confirm('Rondje annuleren?\n\nDe voortgang van dit rondje wordt gewist (er wordt niets vastgelegd).')) return;
   rondje.actief = null;
-  bewaarRondje();
-  planRondjeSync();
-  renderRondje();
-  updateRondjeUI();
+  rondjeGewijzigd();
   toast('Rondje geannuleerd');
 }
 
@@ -1485,19 +1679,13 @@ function rondjeAfronden(auto) {
     if (open) msg += '\n\n' + open + ' locatie(s) zijn niet gecontroleerd — die worden als "niet gedaan" vastgelegd.';
     if (!confirm(msg)) return;
   }
-  const d = new Date();
-  const id = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' +
-    String(d.getDate()).padStart(2, '0') + '_' + String(d.getHours()).padStart(2, '0') +
-    String(d.getMinutes()).padStart(2, '0');
+  const id = stempelId(new Date());
   const scans = Object.values(act.scans).sort((a, b) => (a.ts || 0) - (b.ts || 0));
   rondje.historie.push({ id, gestart: act.gestart, afgerond: Date.now(), items, scans: scans.length });
   // het volledige rapport gaat naar archief/rondje-<id>.json zodra er verbinding is
   rondje.archiefWacht.push({ id, gestart: act.gestart, afgerond: Date.now(), items, scans });
   rondje.actief = null;
-  bewaarRondje();
-  planRondjeSync();
-  renderRondje();
-  updateRondjeUI();
+  rondjeGewijzigd();
   toast(auto ? '🎉 Alle locaties gecontroleerd — rondje afgerond' : '✓ Rondje afgerond');
 }
 
@@ -1533,10 +1721,10 @@ function renderRondje() {
     const gedaan = items.filter(([id]) => { const c = checkVan(act, id); return c && c.w !== 'skip'; }).length;
     const skip = items.filter(([id]) => { const c = checkVan(act, id); return c && c.w === 'skip'; }).length;
     h = '<div class="card"><h2>Rondje bezig</h2>' +
-      '<div style="color:var(--muted);font-size:.83rem;">Gestart ' + fmtTijd.format(act.gestart) +
+      '<div class="uitleg">Gestart ' + fmtTijd.format(act.gestart) +
       ' · scan zoals altijd, locaties vinken vanzelf af. Tik een locatie om handmatig af te vinken of over te slaan.</div>' +
       '<div class="rondje-balk"><div style="width:' + (items.length ? Math.round(gedaan / items.length * 100) : 0) + '%"></div></div>' +
-      '<div style="font-size:.85rem;color:var(--muted);margin-top:6px;">' + gedaan + ' van ' + items.length + ' gecontroleerd' +
+      '<div class="voortgang">' + gedaan + ' van ' + items.length + ' gecontroleerd' +
       (skip ? ' · ' + skip + ' overgeslagen' : '') + '</div>' +
       '<div class="btn-row"><button class="btn geel" id="btnRondjeAfronden">Rondje afronden</button>' +
       '<button class="btn stil klein rood" id="btnRondjeAnnuleer">✕</button></div></div>';
@@ -1549,10 +1737,10 @@ function renderRondje() {
     } else sub = 'Nog geen rondje gelopen';
     if (rondjeDue()) sub += ' — deze week staat het rondje nog open';
     h = '<div class="card"><h2>Wekelijks rondje</h2>' +
-      '<div style="color:var(--muted);font-size:.83rem;margin-bottom:12px;">' + esc(sub) + '</div>' +
+      '<div class="uitleg met-ruimte">' + esc(sub) + '</div>' +
       (items.length
-        ? '<div class="btn-row" style="margin-top:0;"><button class="btn primair" id="btnRondjeStart">▶ Rondje starten</button></div>'
-        : '<div style="color:var(--muted);font-size:.83rem;">Voeg hieronder de locaties toe die je elke week naloopt — een kastnummer (bijv. 11) of een Kardex-la (bijv. 21.10).</div>') +
+        ? '<div class="btn-row direct"><button class="btn primair" id="btnRondjeStart">▶ Rondje starten</button></div>'
+        : '<div class="uitleg">Voeg hieronder de locaties toe die je elke week naloopt — een kastnummer (bijv. 11) of een Kardex-la (bijv. 21.10).</div>') +
       '</div>';
   }
   $('rondjeStatus').innerHTML = h;
@@ -1644,13 +1832,12 @@ function updateRondjeUI() {
 }
 
 // ---------- rondje sheets ----------
-let routeSheetGebied = null;
 
 function renderRouteTags() {
   const div = $('routeTags');
   div.innerHTML = '';
   if (!rondje.gebieden.lijst.length) {
-    div.innerHTML = '<div style="color:var(--muted);font-size:.78rem;">Nog geen gebieden — maak er hieronder een aan.</div>';
+    div.innerHTML = '<div class="bijschrift">Nog geen gebieden — maak er hieronder een aan.</div>';
     return;
   }
   for (const g of rondje.gebieden.lijst) {
@@ -1710,18 +1897,18 @@ function openRouteSheet(id) {
     for (let i = rondje.historie.length - 1; i >= 0 && regels.length < 6; i--) {
       const it = (rondje.historie[i].items || []).find(x => x.loc === loc);
       if (it) {
-        regels.push('<div class="item" style="cursor:default;"><div class="mid"><div class="t1">' +
+        regels.push('<div class="item vast"><div class="mid"><div class="t1">' +
           esc(fmtDatum.format(rondje.historie[i].afgerond)) + '</div>' +
           (it.opm ? '<div class="t2">💬 ' + esc(it.opm) + '</div>' : '') +
           '</div><div class="right">' + statusBadge(it.status, it.n) + '</div></div>');
       }
     }
     if (regels.length) {
-      hh = '<div style="font-size:.8rem;color:var(--muted);margin:8px 0 6px;">Eerdere controles</div>' + regels.join('');
+      hh = '<div class="tussenkop">Eerdere controles</div>' + regels.join('');
     }
   }
   $('routeHistBlok').innerHTML = hh;
-  $('routeOverlay').classList.add('open');
+  openSheet('routeOverlay');
 }
 
 function bewaarRouteItem() {
@@ -1739,11 +1926,8 @@ function bewaarRouteItem() {
     rondje.route[id] = { loc, label, ts: Date.now() };
     if (routeSheetGebied) rondje.route[id].gebied = routeSheetGebied;
   }
-  bewaarRondje();
-  planRondjeSync();
-  $('routeOverlay').classList.remove('open');
-  renderRondje();
-  updateRondjeUI();
+  sluitSheet('routeOverlay');
+  rondjeGewijzigd();
   toast('✓ ' + loc + (label ? ' — ' + label : '') + ' opgeslagen');
 }
 
@@ -1753,11 +1937,8 @@ function verwijderRouteItem() {
   if (!confirm((item.label || item.loc) + ' uit de route verwijderen?')) return;
   // tombstone i.p.v. echt wissen, anders komt het item bij de volgende sync terug
   rondje.route[routeSheetId] = { loc: item.loc, ts: Date.now(), del: true };
-  bewaarRondje();
-  planRondjeSync();
-  $('routeOverlay').classList.remove('open');
-  renderRondje();
-  updateRondjeUI();
+  sluitSheet('routeOverlay');
+  rondjeGewijzigd();
   toast('🗑 ' + item.loc + ' uit de route verwijderd');
 }
 
@@ -1772,7 +1953,7 @@ function openCheckSheet(id) {
   $('checkStatus').textContent = statusTekstCheck(c);
   $('inpCheckOpm').value = c && c.opm ? c.opm : '';
   $('btnCheckReset').hidden = !c;
-  $('checkOverlay').classList.add('open');
+  openSheet('checkOverlay');
 }
 
 function zetCheck(w) {
@@ -1787,11 +1968,8 @@ function zetCheck(w) {
     n: c ? (c.n || 0) : 0,
     opm: $('inpCheckOpm').value.trim()
   };
-  bewaarRondje();
-  planRondjeSync();
-  $('checkOverlay').classList.remove('open');
-  renderRondje();
-  updateRondjeUI();
+  sluitSheet('checkOverlay');
+  rondjeGewijzigd();
   toast(w === 'skip' ? '⏭ ' + item.loc + ' deze ronde overgeslagen' : '✓ ' + item.loc + ' afgevinkt');
   if (w !== 'skip') controleerAutoAfronden();
 }
@@ -1801,11 +1979,8 @@ function resetCheck() {
   if (!act || !checkSheetId) return;
   // tombstone i.p.v. echt wissen, anders komt het vinkje bij de volgende sync terug
   act.checks[checkSheetId] = { ts: Date.now(), w: 'reset' };
-  bewaarRondje();
-  planRondjeSync();
-  $('checkOverlay').classList.remove('open');
-  renderRondje();
-  updateRondjeUI();
+  sluitSheet('checkOverlay');
+  rondjeGewijzigd();
   toast('Vinkje weggehaald');
 }
 
@@ -1822,28 +1997,31 @@ function sluitCheckSheet() {
       renderRondje();
     }
   }
-  $('checkOverlay').classList.remove('open');
+  sluitSheet('checkOverlay');
 }
 
 // ---------- rondje historie-detail & rapport ----------
 function openHistSheet(hs) {
   $('histTitel').textContent = 'Rondje ' + fmtDatum.format(hs.afgerond);
   const gedaan = hs.items.filter(i => i.status === 'scan' || i.status === 'hand').length;
-  let h = '<div style="color:var(--muted);font-size:.83rem;margin-bottom:10px;">' +
+  let h = '<div class="uitleg hist-kop">' +
     gedaan + ' van ' + hs.items.length + ' gecontroleerd · ' +
     esc(fmtTijd.format(hs.gestart)) + ' – ' + esc(fmtTijd.format(hs.afgerond)) + '</div>';
   for (const it of hs.items) {
-    h += '<div class="item" style="cursor:default;"><div class="mid"><div class="t1">' +
+    h += '<div class="item vast"><div class="mid"><div class="t1">' +
       esc(it.loc) + (it.label ? ' — ' + esc(it.label) : '') +
       (it.gebied ? '<span class="gebied-chip">' + esc(it.gebied) + '</span>' : '') + '</div>' +
       (it.opm ? '<div class="t2">💬 ' + esc(it.opm) + '</div>' : '') +
       '</div><div class="right">' + statusBadge(it.status, it.n) + '</div></div>';
   }
-  h += '<div id="histScans">' + (hs.scans ? '<div class="leeg-melding" style="padding:14px;">Scans laden…</div>' : '') + '</div>';
+  h += '<div id="histScans">' + (hs.scans ? '<div class="leeg-melding compact">Scans laden…</div>' : '') + '</div>';
   $('histInhoud').innerHTML = h;
   histCsvData = null;
   $('btnHistCsv').hidden = true;
-  $('histOverlay').classList.add('open');
+  // onthouden welk rondje open staat: de scans worden async geladen en mogen
+  // niet in het sheet van een daarna geopend rondje terechtkomen
+  $('histOverlay').dataset.id = hs.id;
+  openSheet('histOverlay');
   if (hs.scans) laadHistScans(hs);
   else {
     histCsvData = { id: hs.id, gestart: hs.gestart, afgerond: hs.afgerond, items: hs.items, scans: [] };
@@ -1861,16 +2039,16 @@ async function laadHistScans(hs) {
     } catch (e) { /* offline of niet gevonden */ }
   }
   const div = $('histScans');
-  if (!div || !$('histOverlay').classList.contains('open')) return;
+  if (!div || !$('histOverlay').classList.contains('open') || $('histOverlay').dataset.id !== hs.id) return;
   if (!vol) {
-    div.innerHTML = '<div class="leeg-melding" style="padding:14px;">Scans niet beschikbaar (offline?)</div>';
+    div.innerHTML = '<div class="leeg-melding compact">Scans niet beschikbaar (offline?)</div>';
     return;
   }
-  let h = '<div style="font-size:.8rem;color:var(--muted);margin:10px 0 6px;">Geregistreerd tijdens dit rondje · ' + vol.scans.length + '</div>';
+  let h = '<div class="tussenkop ruim">Geregistreerd tijdens dit rondje · ' + vol.scans.length + '</div>';
   for (const s of vol.scans) {
-    const badges = (s.g != null ? '<span class="badge groen">✓ ' + s.g + '</span> ' : '') +
-      (s.best ? '<span class="badge geel">bestel ' + s.best + '</span>' : '');
-    h += '<div class="item" style="cursor:default;"><div class="mid"><div class="t1">' + esc(s.o || s.b) + '</div>' +
+    const badges = (s.g != null ? '<span class="badge groen">✓ ' + esc(s.g) + '</span> ' : '') +
+      (s.best ? '<span class="badge geel">bestel ' + esc(s.best) + '</span>' : '');
+    h += '<div class="item vast"><div class="mid"><div class="t1">' + esc(s.o || s.b) + '</div>' +
       '<div class="t2">' + esc(s.a || s.b) + ' · ' + locHtml(s.l) +
       (s.opm ? ' · 💬 ' + esc(s.opm) : '') + '</div></div><div class="right">' + badges + '</div></div>';
   }
@@ -1880,31 +2058,22 @@ async function laadHistScans(hs) {
 }
 
 function downloadRondjeCsv(vol) {
-  const cel = (v) => {
-    v = String(v == null ? '' : v);
-    return /[;"\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
-  };
   const st = { scan: 'gecontroleerd (scan)', hand: 'gecontroleerd (handmatig)', skip: 'overgeslagen', open: 'niet gedaan' };
   const regels = ['Locatie;Label;Gebied;Status;Tijd;Scans;Opmerking'];
   for (const it of vol.items) {
-    regels.push([it.loc, it.label || '', it.gebied || '', st[it.status] || it.status,
-      it.ts ? fmtTijd.format(it.ts) : '', it.n || '', it.opm || ''].map(cel).join(';'));
+    regels.push(csvRegel([it.loc, it.label || '', it.gebied || '', st[it.status] || it.status,
+      it.ts ? fmtTijd.format(it.ts) : '', it.n || '', it.opm || '']));
   }
   if ((vol.scans || []).length) {
     regels.push('');
     regels.push('Tijd;Barcode;Artikelnummer;Omschrijving;Locatie;Locatienotatie;Geteld;Bestellen;Besteld;Opmerking');
     for (const s of vol.scans) {
-      regels.push([fmtTijd.format(s.ts), s.b, s.a, s.o, s.l,
+      regels.push(csvRegel([fmtTijd.format(s.ts), s.b, s.a, s.o, s.l,
         s.l && !locNotatieOk(s.l) ? 'afwijkend' : '',
-        s.g != null ? s.g : '', s.best != null ? s.best : '', s.bsd ? 'ja' : '', s.opm || ''].map(cel).join(';'));
+        s.g != null ? s.g : '', s.best != null ? s.best : '', s.bsd ? 'ja' : '', s.opm || '']));
     }
   }
-  const blob = new Blob(['﻿' + regels.join('\r\n')], { type: 'text/csv;charset=utf-8' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = 'Rondje ' + new Date(vol.afgerond).toISOString().slice(0, 10) + '.csv';
-  a.click();
-  URL.revokeObjectURL(a.href);
+  downloadCsv('Rondje ' + new Date(vol.afgerond).toISOString().slice(0, 10) + '.csv', regels);
 }
 
 // ---------- UI ----------
@@ -1920,17 +2089,27 @@ function toonView(naam) {
 }
 
 // niet renderen terwijl er in een overzicht-veldje getypt wordt (sync zou de
-// invoer wissen); de render wordt dan uitgesteld tot het veld wordt verlaten
-let renderUitgesteld = false;
+// invoer wissen); de render wordt dan uitgesteld tot het veld wordt verlaten.
+// Alleen het zichtbare tabblad wordt opnieuw opgebouwd; toonView rendert de
+// andere zodra ze geopend worden. De teller in de navigatie loopt altijd mee.
 function renderAlles() {
   const a = document.activeElement;
   if (a && a.matches && a.matches('.ov-aantal, .ov-ink')) { renderUitgesteld = true; return; }
   renderUitgesteld = false;
-  renderLijst();
+  updateNavBadge();
+  if ($('view-lijst').classList.contains('active')) renderLijst();
   if ($('view-overzicht').classList.contains('active')) renderOverzicht();
 }
 
-let toastTimer = null;
+function openSheet(id) { $(id).classList.add('open'); }
+function sluitSheet(id) { $(id).classList.remove('open'); }
+
+function kopieer(tekst) {
+  navigator.clipboard.writeText(tekst)
+    .then(() => toast('Gekopieerd: ' + tekst))
+    .catch(() => toast('Kopiëren mislukt', true));
+}
+
 function toast(msg, fout) {
   const t = $('toast');
   t.textContent = msg;
@@ -1956,15 +2135,15 @@ function bindEvents() {
 
   $('btnScan').addEventListener('click', startScanner);
   $('btnTrigger').addEventListener('click', scanNu);
-  $('btnCamSluit').addEventListener('click', stopScanner);
+  $('btnCamSluit').addEventListener('click', () => stopScanner());
   $('btnTorch').addEventListener('click', wisselTorch);
-  $('btnKiesSluit').addEventListener('click', () => $('kiesOverlay').classList.remove('open'));
+  $('btnKiesSluit').addEventListener('click', () => sluitSheet('kiesOverlay'));
 
   $('btnZoek').addEventListener('click', handmatigZoeken);
   $('zoekInput').addEventListener('keydown', e => {
     if (e.key !== 'Enter') return;
     // handscanner-stand: Enter (van de scanner) = direct openen
-    if (handscannerAan() && !hsTypStand) { e.preventDefault(); hsVerwerkVeld(); }
+    if (handscannerAan() && !hsTypStand) { e.preventDefault(); hsOpen($('zoekInput').value); }
     else handmatigZoeken();
   });
 
@@ -1975,7 +2154,7 @@ function bindEvents() {
     clearTimeout(hsVeldTimer);
     if ($('zoekInput').value.trim().length < 3) return;
     hsVeldTimer = setTimeout(() => {
-      if (handscannerAan() && !hsTypStand) hsVerwerkVeld();
+      if (handscannerAan() && !hsTypStand) hsOpen($('zoekInput').value);
     }, 350);
   });
   // ⌨-knop: toetsenbord er bewust bij pakken om te typen/zoeken
@@ -2020,8 +2199,8 @@ function bindEvents() {
   $('btnVorig').addEventListener('click', () => blader(-1));
   $('btnVolgend').addEventListener('click', () => blader(1));
 
-  $('btnSyncNu').addEventListener('click', () => { syncTelling(); syncRondje(); });
-  $('btnCsv').addEventListener('click', downloadCsv);
+  $('btnSyncNu').addEventListener('click', () => { syncTelling(); syncRondje(); herprobeerArtikelen(); });
+  $('btnCsv').addEventListener('click', downloadScanlijst);
   $('btnAllesTonen').addEventListener('click', () => { ovFilter = null; renderOverzicht(); });
   $('btnAfronden').addEventListener('click', rondAf);
   $('btnArtVerversen').addEventListener('click', () => verversArtikelen(false));
@@ -2042,7 +2221,7 @@ function bindEvents() {
   $('rondjeHint').addEventListener('click', () => toonView('rondje'));
   $('btnRouteToevoegen').addEventListener('click', () => openRouteSheet(null));
   $('btnRouteOpslaan').addEventListener('click', bewaarRouteItem);
-  $('btnRouteSluit').addEventListener('click', () => $('routeOverlay').classList.remove('open'));
+  $('btnRouteSluit').addEventListener('click', () => sluitSheet('routeOverlay'));
   $('btnRouteDel').addEventListener('click', verwijderRouteItem);
   $('btnNieuwGebied').addEventListener('click', voegGebiedToe);
   $('inpNieuwGebied').addEventListener('keydown', e => { if (e.key === 'Enter') voegGebiedToe(); });
@@ -2050,7 +2229,7 @@ function bindEvents() {
   $('btnCheckSkip').addEventListener('click', () => zetCheck('skip'));
   $('btnCheckReset').addEventListener('click', resetCheck);
   $('btnCheckSluit').addEventListener('click', sluitCheckSheet);
-  $('btnHistSluit').addEventListener('click', () => $('histOverlay').classList.remove('open'));
+  $('btnHistSluit').addEventListener('click', () => sluitSheet('histOverlay'));
   $('btnHistCsv').addEventListener('click', () => { if (histCsvData) downloadRondjeCsv(histCsvData); });
   $('selRondjeDag').addEventListener('change', () => {
     localStorage.setItem('mgz_rondjedag', $('selRondjeDag').value);
@@ -2094,11 +2273,18 @@ function bindEvents() {
   window.addEventListener('online', () => {
     if (syncNodig) syncTelling();
     if (rondjeSyncNodig) syncRondje();
+    herprobeerArtikelen();
   });
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible' && syncNodig) syncTelling();
-    if (document.visibilityState === 'visible' && rondjeSyncNodig) syncRondje();
-    if (document.visibilityState === 'hidden') stopScanner();
+    if (document.visibilityState === 'visible') {
+      if (syncNodig) syncTelling();
+      if (rondjeSyncNodig) syncRondje();
+      herprobeerArtikelen();
+      // bij het (her)openen van de app controleren of er een nieuwe versie online staat
+      if (swReg) swReg.update();
+    } else if (document.visibilityState === 'hidden') {
+      stopScanner();
+    }
   });
 }
 
@@ -2148,8 +2334,6 @@ function pasScanIndelingToe() {
 }
 
 // ---------- service worker & app-updates ----------
-let updateWacht = false;
-
 function pasUpdateToe() {
   // niet verversen midden in een open artikel of tijdens het scannen
   if (!$('artPanel').hidden || camActief) {
@@ -2167,12 +2351,9 @@ function registreerSw() {
     if (!hadController) { hadController = true; return; } // allereerste installatie
     pasUpdateToe();
   });
-  navigator.serviceWorker.register('sw.js').then(reg => {
-    // bij het (her)openen van de app controleren of er een nieuwe versie online staat
-    document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible') reg.update();
-    });
-  }).catch(() => { /* offline; volgende keer opnieuw proberen */ });
+  navigator.serviceWorker.register('sw.js')
+    .then(reg => { swReg = reg; })   // update-check bij zichtbaar worden: zie bindEvents
+    .catch(() => { /* offline; volgende keer opnieuw proberen */ });
 }
 
 // ---------- start ----------
@@ -2192,7 +2373,7 @@ function init() {
   pasHandscannerToe();
   toonSetupBanner();
   updateArtInfo();
-  renderLijst();
+  updateNavBadge();
   updateRondjeUI();
 
   // op een pc met groot scherm direct het overzicht tonen
@@ -2205,9 +2386,9 @@ function init() {
     syncTelling();
     syncRondje();
   } else if (!navigator.onLine) {
-    zetStatus('err', 'Offline');
+    zetStatus('telling', 'err', 'Offline');
   } else {
-    zetStatus('err', 'Geen token');
+    zetStatus('telling', 'err', 'Geen token');
   }
 
   registreerSw();

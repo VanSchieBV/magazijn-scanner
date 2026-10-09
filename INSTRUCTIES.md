@@ -42,9 +42,20 @@ Het token wordt alleen lokaal op het apparaat bewaard.
 
 - Maak een bladwijzer naar de app-URL (voor het overzicht van telverschillen en bestellingen).
 - **Artikellijst bijwerken:** dubbelklik de snelkoppeling **"Artikellijst bijwerken"** op het
-  bureaublad. Die leest `Export Artikelen.xlsx` (of `.csv`) uit
-  `C:\Users\td\Projecten_AI\MagazijnScanner\Bron` en zet de nieuwe artikellijst in de cloud.
+  bureaublad. Die leest `Artikelen.xlsx` (of `.csv`) uit
+  `C:\Users\td\Projecten_AI\MagazijnScanner\Bron`, schoont de lijst op (rijen zonder
+  barcode worden verwijderd) en zet de nieuwe artikellijst in de cloud.
   De app haalt de lijst automatisch op bij de volgende start.
+- **Automatisch:** de geplande taak *"Magazijn Scanner - Artikellijst bijwerken"*
+  (Taakplanner) doet hetzelfde elke werkdag om **09:15** en **12:45**, maar alleen
+  als `Artikelen.xlsx` sinds de vorige keer is vernieuwd — anders slaat hij over.
+  Wat er gebeurd is staat in `pc\bijwerken-taak.log`.
+- **Welk token het script gebruikt:** niet het fine-grained token uit stap 1, maar de
+  GitHub-login van **GitHub Desktop** op deze pc (via de Windows Referentiebeheerder,
+  `git credential fill`). Dat is een breder token dan nodig, maar het werkt zonder extra
+  instelwerk. Ben je in GitHub Desktop uitgelogd, dan meldt het script "Geen GitHub-token
+  gevonden"; opnieuw aanmelden in GitHub Desktop lost dat op. Op een nieuwe pc: GitHub
+  Desktop installeren, aanmelden, en de geplande taak opnieuw registreren.
 - In diezelfde map hoort **`Crediteuren.xlsx`** (kolommen `Cred.nr` en `Naam`). Het script zet
   daarmee de crediteurcode uit de export om naar de volledige naam, zodat het overzicht
   "Trailer Service Veenendaal B.V." toont in plaats van `TSVVEE10334`. Staat een code niet in
@@ -57,12 +68,14 @@ Het token wordt alleen lokaal op het apparaat bewaard.
   laserscanner. De camera-scanknop verdwijnt; scan een code en het artikel opent
   vanzelf, zonder dat het toetsenbord omhoog komt. Het schuifje blijft op dat
   toestel aan staan.
-- **Geteld** → lijst van wat deze ronde al geteld is.
+- **Gescand** → lijst van wat in deze controle al geregistreerd is.
 - **Overzicht** (PC) → telverschillen en bestellingen per crediteur.
-- **Telling afronden & leegmaken** (Instellingen) → archiveert de telling in de cloud en
-  begint met een schone lijst. Alleen doen als de hele telronde klaar is.
+- **Controle afronden & leegmaken** (Instellingen) → archiveert de controle in de cloud en
+  begint met een schone lijst, ook op de andere apparaten. Alleen doen als de hele ronde
+  klaar is. Lukt de sync vlak ervoor niet (bijv. slechte wifi), dan breekt de app het
+  afronden af en wordt er niets gewist; probeer het dan opnieuw.
 - **Uitloop** → artikelen die niet meer gebruikt worden zet je op de uitlooplijst
-  met de knop **📉 Markeer als uitloop** in het artikelscherm. Scan je zo'n artikel,
+  met de knop **📉 Uitloop** in het artikelscherm. Scan je zo'n artikel,
   dan verschijnt een rode melding ("wordt niet meer aangevuld, op = op"). De hele
   lijst staat onderaan het **Overzicht**; zelfde knop haalt een artikel er weer af.
 - **⚠ achter een locatie** → de locatie staat niet in de standaardnotatie

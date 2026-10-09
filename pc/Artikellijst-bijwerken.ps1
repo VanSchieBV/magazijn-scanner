@@ -7,7 +7,7 @@ param([string]$Bestand)
 
 $ErrorActionPreference = 'Stop'
 $Repo = 'VanSchieBV/magazijn-data'
-# Bronmap: nieuwste "Export Artikelen.xlsx" of ".csv" wint (csv komt er later automatisch)
+# Bronmap: nieuwste "Artikelen.xlsx" of ".csv" wint (csv komt er later automatisch)
 $BronMap = 'C:\Users\td\Projecten_AI\MagazijnScanner\Bron'
 
 function Wacht {
@@ -21,7 +21,7 @@ Write-Host '=== Artikellijst bijwerken (Magazijn Scanner) ===' -ForegroundColor 
 
 # --- 1. bronbestand bepalen ---
 if (-not $Bestand) {
-    $kandidaten = @(Get-ChildItem -Path (Join-Path $BronMap 'Export Artikelen.*') -ErrorAction SilentlyContinue |
+    $kandidaten = @(Get-ChildItem -Path (Join-Path $BronMap 'Artikelen.*') -ErrorAction SilentlyContinue |
         Where-Object { $_.Extension -in '.xlsx', '.csv' } |
         Sort-Object LastWriteTime -Descending)
     if ($kandidaten.Count) {
@@ -204,9 +204,14 @@ $veldKol = @{
     l = $kolommen['Locatie']; v = $kolommen[$voorraadKop]
 }
 $credOnbekend = @{}
+$zonderBarcode = 0
+$artAfwijkend = New-Object System.Collections.Generic.List[string]
 foreach ($rij in $dataRijen) {
     $bc = ('' + $rij[$veldKol.b]).Trim()
-    if (-not $bc) { continue }
+    # opschonen: rijen zonder barcode (kolom A leeg) gaan niet mee
+    if (-not $bc) { $zonderBarcode++; continue }
+    $art = ('' + $rij[$veldKol.a]).Trim()
+    if ($art -and $art -notlike 'O*') { $artAfwijkend.Add($art) }
     # crediteurcode omzetten naar de volledige naam; onbekende code blijft staan
     $credCode = ('' + $rij[$veldKol.c]).Trim()
     $cred = $credCode
@@ -216,7 +221,7 @@ foreach ($rij in $dataRijen) {
     }
     if ($aantal) { $null = $sb.Append(',') }
     $null = $sb.Append('{"b":"').Append((JsonEsc $bc))
-    $null = $sb.Append('","a":"').Append((JsonEsc ('' + $rij[$veldKol.a]).Trim()))
+    $null = $sb.Append('","a":"').Append((JsonEsc $art))
     $null = $sb.Append('","o":"').Append((JsonEsc ('' + $rij[$veldKol.o]).Trim()))
     $null = $sb.Append('","c":"').Append((JsonEsc $cred))
     $null = $sb.Append('","f":"').Append((JsonEsc ('' + $rij[$veldKol.f]).Trim()))
@@ -229,7 +234,13 @@ foreach ($rij in $dataRijen) {
 $null = $sb.Append(']}')
 $json = $sb.ToString()
 if ($aantal -lt 10) { throw "Slechts $aantal artikelen gevonden - dat lijkt niet goed. Gestopt." }
+Write-Host ("Opgeschoond: {0} rijen zonder barcode verwijderd." -f $zonderBarcode)
 Write-Host ("{0} artikelen, {1:N0} kB JSON" -f $aantal, ($json.Length / 1024))
+if ($artAfwijkend.Count) {
+    $voorbeeld = ($artAfwijkend | Select-Object -First 5) -join ', '
+    Write-Host ("Let op: {0} artikel(en) met barcode hebben een artikelnummer dat niet met 'O' begint (bijv. {1})." -f `
+        $artAfwijkend.Count, $voorbeeld) -ForegroundColor Yellow
+}
 if ($credOnbekend.Count) {
     Write-Host ("Let op: {0} crediteurcode(s) staan niet in Crediteuren.xlsx en blijven als code staan: {1}" -f `
         $credOnbekend.Count, (($credOnbekend.Keys | Sort-Object) -join ', ')) -ForegroundColor Yellow

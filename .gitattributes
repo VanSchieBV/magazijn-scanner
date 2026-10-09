@@ -1,0 +1,7 @@
+# broncode altijd met LF in de repo en in de werkmap (geen CRLF-waarschuwingen meer)
+* text=auto eol=lf
+# PowerShell-scripts houden CRLF (Windows-eigen)
+*.ps1 text eol=crlf
+# binair, nooit regeleinden aanpassen
+*.png binary
+*.xlsx binary
