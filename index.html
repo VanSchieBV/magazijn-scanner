@@ -117,10 +117,24 @@
           <button class="btn stil" id="btnAnnuleer">Annuleren</button>
         </div>
         </div>
-        <!-- simpele weergave: alleen op de bestellijst zetten -->
-        <div class="btn-row" id="artSimpelKnoppen" hidden>
-          <button class="btn primair" id="btnSimpelBestellen">✓ Bestellen, terug naar scannen</button>
-          <button class="btn stil" id="btnSimpelAnnuleer">Annuleren</button>
+        <!-- simpele weergave: aantal bestellen, opslaan = op de bestellijst en terug naar scannen -->
+        <div id="artSimpel" hidden>
+          <div class="telrij">
+            <div class="telveld sel">
+              <div class="lbl">Bestellen</div>
+              <div class="stap-veld">
+                <button type="button" class="stap" data-inp="inpSimpelBestellen" data-d="-1" aria-label="Eén minder">−</button>
+                <input type="number" id="inpSimpelBestellen" inputmode="numeric" placeholder="–">
+                <button type="button" class="stap" data-inp="inpSimpelBestellen" data-d="1" aria-label="Eén meer">+</button>
+              </div>
+            </div>
+          </div>
+          <div class="btn-row">
+            <button class="btn primair" id="btnSimpelOpslaan">Opslaan</button>
+          </div>
+          <div class="btn-row">
+            <button class="btn stil" id="btnSimpelAnnuleer">Annuleren</button>
+          </div>
         </div>
       </div>
     </div>
@@ -174,7 +188,7 @@
           <li>Dit zijn de artikelen die in het magazijn gescand zijn omdat ze bijna op zijn, per leverancier.</li>
           <li>Klik op het kopieer-icoontje <b>⧉</b> achter een nummer. Het nummer staat dan op het klembord; je hoeft niets met de muis te selecteren.</li>
           <li>Ga naar de webshop van de leverancier en log daar in.</li>
-          <li>Plak het nummer uit de kolom <b>Hun nummer</b> in de webshop en bestel het artikel.</li>
+          <li>Plak het nummer uit de kolom <b>Hun nummer</b> in de webshop en bestel het artikel. Staat er iets bij <b>Aantal</b>, dan is dat het aantal dat in het magazijn is opgegeven.</li>
           <li>Besteld? Vink het vakje <b>Besteld</b> aan en vul in hoeveel <b>verpakkingen</b> je hebt besteld. Een doos van 200 boutjes is 1.</li>
         </ol>
       </div>

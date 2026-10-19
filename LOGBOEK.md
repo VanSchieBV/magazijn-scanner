@@ -3,6 +3,43 @@
 Nieuwste sessie bovenaan. Oudere geschiedenis staat in git (`git log --oneline`) en in de vault
 (`NoteFlow\projecten\MagazijnScanner\Verleden.md`).
 
+## 2026-10-19 (avond, vervolg) — v1.16.1: aantal invullen op de scanner (simpele weergave)
+
+**Aanleiding.** Timo na de uitrol van v1.16.0: "Je moet wel de aantallen in kunnen vullen op de
+scanner met simpele weergave." Gewenste opbouw onder het artikel: Locatie - Voorraad, dan
+"− Bestellen +", dan Opslaan, dan Annuleren. Opslaan gaat terug naar de scanner; de knop
+"Bestellen, terug naar scannen" vervalt. Dit wijzigt beslissing B3 van het plan (scan zonder aantal).
+
+**Gedaan.**
+- `index.html`: `#artSimpelKnoppen` vervangen door `#artSimpel`: een `.telrij` met één telveld
+  Bestellen (`#inpSimpelBestellen`, − en + met de bestaande `.stap`-knoppen), daaronder elk in een
+  eigen rij `#btnSimpelOpslaan` en `#btnSimpelAnnuleer`. Uitlegstap 4 noemt nu de kolom Aantal.
+- `app.js`: `simpelBestellen` wordt `simpelOpslaan`: met een aantal ≥ 1 wordt dat `best`, zonder
+  aantal komt de regel er als `bl` op; al op de lijst en niets veranderd = alleen terug naar de
+  scanner (geen nieuwe `ts`); een leeg veld haalt een bestaand aantal niet weg. Het veld toont een
+  bestaand aantal. Enter in het veld = Opslaan. Toast met het aantal. Versie 1.16.1.
+- Pc in de simpele weergave: de besteltabel heeft de kolom **Aantal** weer (bewerkbaar, zoals
+  normaal), het verpakkingenveld blijft in plaats van het inkoopnummer. De CSS-regels voor
+  `.bestel-tabel.simpel` zijn weg.
+- Tests aangepast en uitgebreid (`t_simpel_pc`, `t_simpel_telefoon`): volgorde veld/knoppen, + knop,
+  opslaan met en zonder aantal, Enter, bestaand aantal in het veld, Annuleren legt niets vast,
+  kolom Aantal op de pc.
+- Documentatie: README, INSTRUCTIES.md (ook de token-zin eenduidig gemaakt), ASK-kennis.
+
+**Eigen keuzes (niet expliciet gevraagd).** Leeg veld + Opslaan = toch op de lijst zonder aantal
+(zoals v1.16.0), niet weigeren. Kolom Aantal terug op de pc, anders ziet wie bestelt het ingevulde
+aantal niet.
+
+**Testresultaten.** `node --check app.js` OK; simpele tests 54/54; volledige reeks **198/198**.
+Schermafdrukken: telefoon-artikelscherm (Locatie - Voorraad, "− Bestellen +", Opslaan, Annuleren)
+en pc-bestellijst met de kolom Aantal; geen horizontale scrollbalk, geen JavaScript-fouten.
+
+**Uitrol.** Timo: "zet online". Gecommit en gepusht als v1.16.1; Pages-run en live versie
+gecontroleerd (zie de vault-log "v1.16.1 gepusht en live").
+
+**Status.** v1.16.1 live en in git. Plan: GEBOUWD, nagekeken: nee (Fable kijkt v1.16.0 en v1.16.1
+samen na).
+
 ## 2026-10-19 (avond) — v1.16.0: simpele weergave gebouwd (Opus), niet gecommit
 
 **Aanleiding.** Timo: `recap`, daarna "go" op `PLAN-simpele-weergave.md`. Gebouwd door Opus
@@ -61,17 +98,23 @@ kolom Besteld: een rondje-scan bewaart `bsd` als vlag (1), de CSV maakt er een d
 "Rondje-CSV toont 1970-01-01 in de kolom Besteld".
 
 **Aandachtspunt.** In de simpele weergave toont Instellingen alleen de schuif, ook als de
-setupbanner (geen token) naar Instellingen verwijst. Een token invullen kan dus alleen met de
-simpele weergave uit; dat staat in INSTRUCTIES.md.
+setupbanner (geen token) naar Instellingen verwijst. Het bestaande token blijft gewoon werken; alleen
+als er ooit een ander token in moet (verlopen, nieuw toestel), zet je de simpele weergave even uit.
+Timo vroeg of er een nieuw token nodig was: nee, de zin in INSTRUCTIES.md is dubbelzinnig. Idee
+(niet gebouwd): kaart Koppeling in de simpele stand tonen zolang er geen of een geweigerd token is.
 
-**Status.** v1.16.0 gebouwd in de werkmap, **niet gecommit en niet gepusht**. Plan: GEBOUWD,
-nagekeken: nee.
+**Uitrol.** Timo: "Je mag hem online zetten" (vóór het nakijken door Fable). Gecommit als
+`bb3f744` (`v1.16.0: simpele weergave`, met het plan) en gepusht; `.claude/` blijft buiten git.
+Pages-run van `bb3f744` geslaagd; live melden `sw.js` `mgz-v1.16.0` en `app.js` `1.16.0`. Deze
+logboekregel zelf is nog niet gecommit.
+
+**Status.** v1.16.0 live en in git. Plan: GEBOUWD, nagekeken: nee.
 
 **Open punten.**
 - Nakijken door Fable (`/clear`, Fable, `recap`): diff van `app.js` (`openPaneel`,
   `simpelBestellen`, `renderOverzicht`) en de testuitslag. Daarna plan afsluiten in de vault.
-- Op Timo's verzoek committen en pushen (`v1.16.0: simpele weergave`), daarna op de pc en de
-  scanner nalopen.
+- Op de pc en de scanner nalopen: schuif aanzetten, scannen, bestellijst met verpakkingen.
+- ~~INSTRUCTIES.md: de token-zin eenduidig maken~~ gedaan in v1.16.1.
 - Rondje-CSV-fout (vault-issue).
 - Nog open uit de vault: v1.14.0/v1.15.0 nalopen op de telefoon, vastgelopen Pages-run afbreken,
   `git stash drop`.

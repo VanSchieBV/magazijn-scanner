@@ -969,9 +969,6 @@ body.simpel #view-instellingen .card:not(#kaartSimpel) { display: none; }
 .uitleg-simpel .uitleg-titel { font-weight: 650; margin-bottom: 6px; }
 .uitleg-simpel ol { margin: 0; padding-left: 1.3em; }
 .uitleg-simpel li { margin: 4px 0; }
-/* simpele besteltabel: geen kolom Aantal, Besteld (vinkje + verpakkingen) uiterst rechts */
-table.bestel-tabel.simpel th:nth-child(3) { width: 6rem; }    /* Locatie */
-table.bestel-tabel.simpel th:nth-child(4) { width: 11rem; text-align: right; }   /* Besteld */
 /* simpel artikelscherm: artikelcode groter, twee kolommen, crediteur over de volle breedte */
 .art-nr.groot { font-size: 1.35rem; font-weight: 700; margin-top: 4px; }
 .art-grid.simpel { grid-template-columns: 1fr 1fr; }

@@ -102,20 +102,21 @@ omzet; zet je hem uit, dan is de app weer precies zoals hij was.
   scanner of telefoon bovenaan **Instellingen** (*Weergave → Simpele weergave*).
 - **Scanner:** zichtbaar zijn Scannen, Gescand en Instellingen (met alleen de schuif en het
   versienummer). Scan een artikel dat bijna op is: je ziet omschrijving, artikelcode, leverancier,
-  fabrikantnummer, hun nummer, locatie en voorraad. Tik **✓ Bestellen, terug naar scannen**: het
-  artikel staat op de bestellijst (zonder aantal) en je kunt meteen verder scannen. **Annuleren**
-  legt niets vast. Staat het artikel al op de lijst, dan meldt de app dat en heet de knop
-  **Terug naar scannen**.
+  fabrikantnummer, hun nummer, locatie en voorraad, en daaronder het veld **Bestellen** met − en +.
+  Vul in hoeveel er besteld moet worden (mag ook leeg blijven) en tik **Opslaan**: het artikel staat
+  op de bestellijst en je bent meteen terug bij de scanner. **Annuleren** legt niets vast. Staat het
+  artikel al op de lijst, dan meldt de app dat en staat het aantal al in het veld; pas het aan of
+  tik gewoon Opslaan.
 - **Pc:** zichtbaar zijn Scannen, Gescand en Overzicht. Het overzicht toont alleen de bestellijst
-  per leverancier, met bovenaan een korte uitleg in stappen. Kopieer *Hun nummer* met het
-  ⧉-icoontje, bestel in de webshop van de leverancier, vink **Besteld** aan en vul in hoeveel
-  **verpakkingen** je besteld hebt (een doos van 200 boutjes is 1). De knoppen 🧹 om bestelde
-  regels op te schonen blijven ook hier staan.
+  per leverancier, met het aantal uit het magazijn en bovenaan een korte uitleg in stappen. Kopieer
+  *Hun nummer* met het ⧉-icoontje, bestel in de webshop van de leverancier, vink **Besteld** aan en
+  vul in hoeveel **verpakkingen** je besteld hebt (een doos van 200 boutjes is 1). De knoppen 🧹 om
+  bestelde regels op te schonen blijven ook hier staan.
 - **Vooraf instellen (Timo):** de handscanner-stand zet je aan vóórdat je de simpele weergave
-  aanzet; het schuifje Handscanner is daarna verborgen, maar de stand blijft gelden. Hetzelfde
-  geldt voor het token: in de simpele weergave toont Instellingen alleen de schuif, dus moet er
-  een nieuw token in, zet de simpele weergave dan even uit. Een lopend rondje telt de scans
-  gewoon mee.
+  aanzet; het schuifje Handscanner is daarna verborgen, maar de stand blijft gelden. Het token dat
+  al op het apparaat staat blijft gewoon werken. Alleen als er ooit een ander token in moet (verlopen,
+  nieuw toestel): de kaart Koppeling is in de simpele weergave verborgen, zet de schuif dan even uit.
+  Een lopend rondje telt de scans gewoon mee.
 
 ## Wekelijks rondje
 

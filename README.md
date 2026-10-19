@@ -20,10 +20,12 @@ alles of per leverancier), **Instellingen** token, artikellijst en werkwijze.
 
 **Simpele weergave** (sinds v1.16.0, per apparaat): een schuif in de header (alleen op de pc, vanaf
 900 px breed) en bovenaan Instellingen. Aan = alleen wat collega's nodig hebben. Op de scanner:
-Scannen, Gescand en Instellingen (alleen de schuif); een scan opent een kort artikelscherm met
-**✓ Bestellen, terug naar scannen**, dat het artikel zonder aantal op de bestellijst zet (veld `bl`).
-Op de pc: Scannen, Gescand en Overzicht, met alleen de bestellijst per leverancier, een uitleg in vijf
-stappen en naast het vinkje Besteld het aantal verpakkingen (veld `vp`). Sync, besteldatum, opschonen,
+Scannen, Gescand en Instellingen (alleen de schuif); een scan opent een kort artikelscherm met onder
+locatie en voorraad het veld **Bestellen** (− en +), **Opslaan** en **Annuleren** (sinds v1.16.1).
+Opslaan zet het artikel op de bestellijst en gaat terug naar de scanner: met een aantal als
+bestelaantal (`best`), zonder aantal als "bijna leeg" (veld `bl`).
+Op de pc: Scannen, Gescand en Overzicht, met alleen de bestellijst per leverancier (met de kolom
+Aantal), een uitleg in vijf stappen en naast het vinkje Besteld het aantal verpakkingen (veld `vp`). Sync, besteldatum, opschonen,
 het rondje (een scan telt mee) en de handscanner-stand lopen gewoon door. Uit = de app zoals hij was.
 
 ## Bouwen en testen

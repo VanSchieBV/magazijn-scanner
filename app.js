@@ -5,7 +5,7 @@
 'use strict';
 
 // ---------- constanten ----------
-const VERSIE = '1.16.0';
+const VERSIE = '1.16.1';
 const DATA_REPO = 'VanSchieBV/magazijn-data';
 const API_BASE = 'https://api.github.com/repos/' + DATA_REPO + '/contents/';
 const SYNC_HERKANS_MS = 8000;                        // herkansing na een netwerk- of serverfout
@@ -924,11 +924,11 @@ function openPaneel(art, behoudBlader, key) {
   huidigArt = art;
   huidigeKey = key || sleutelVoor(art, telling.items);
   const bestaand = levend(telling.items[huidigeKey]);
-  // simpele weergave: zes regels (omschrijving, artikelcode, crediteur, fabrikant- en
-  // hun nummer, locatie en voorraad) en alleen de knoppen Bestellen en Annuleren
+  // simpele weergave: omschrijving, artikelcode, crediteur, fabrikant- en hun nummer,
+  // locatie en voorraad, daaronder alleen het veld Bestellen en Opslaan / Annuleren
   const simpel = simpelAan();
   $('artNormaal').hidden = simpel;
-  $('artSimpelKnoppen').hidden = !simpel;
+  $('artSimpel').hidden = !simpel;
   $('artGrid').classList.toggle('simpel', simpel);
   if (simpel) {
     bladerKeys = []; bladerIdx = -1;      // geen bladerpijlen in de simpele stand
@@ -945,7 +945,7 @@ function openPaneel(art, behoudBlader, key) {
         veld('Locatie', esc(art.l || '–')) +
         veld('Voorraad', esc(art.v || '0'), 'groen');
     bindKopieKnoppen($('artGrid'));
-    $('btnSimpelBestellen').textContent = opLijst ? 'Terug naar scannen' : '✓ Bestellen, terug naar scannen';
+    $('inpSimpelBestellen').value = bestaand && bestaand.best != null ? bestaand.best : '';
     $('scanIdle').hidden = true;
     $('artPanel').hidden = false;
     $('bladerNav').hidden = true;
@@ -1155,23 +1155,31 @@ function zetSimpel(aan) {
   toast(aan ? 'Simpele weergave aan' : 'Simpele weergave uit');
 }
 
-// scan in de simpele stand: het artikel op de bestellijst zetten (bl = bijna leeg,
-// zonder aantal) en terug naar de scanner. Bestaande velden van de registratie blijven.
-function simpelBestellen() {
+// Opslaan in de simpele stand: het artikel op de bestellijst zetten en terug naar de
+// scanner. Met een aantal wordt dat het bestelaantal (best); zonder aantal komt het er
+// als "bijna leeg" op (bl). Een leeg veld haalt een bestaand aantal niet weg.
+// Bestaande velden van de registratie blijven staan.
+function simpelOpslaan() {
   if (!huidigArt) return;
   const art = huidigArt;
-  const nu = Date.now();
+  const n = leesGetal('inpSimpelBestellen');
+  const aantal = n != null && n > 0 ? n : null;
   const oud = levend(telling.items[huidigeKey]);
-  if (oud && opBestellijst(oud)) { sluitPaneel(); naSimpelScan(); return; }
+  // al op de lijst en niets veranderd: alleen terug naar de scanner
+  if (oud && opBestellijst(oud) && (aantal == null || aantal === oud.best)) { sluitPaneel(); naSimpelScan(); return; }
+  const nu = Date.now();
   const entry = Object.assign(
     { b: art.b, a: art.a, o: art.o, c: art.c, f: art.f, h: art.h, l: art.l, v: art.v },
-    oud || {}, { bl: nu, ts: nu });
+    oud || {}, { ts: nu });
+  if (aantal != null) entry.best = aantal;
+  else entry.bl = nu;
   if (art.onb) entry.onb = true;
   telling.items[huidigeKey] = entry;
   bewaarTelling();
   planSync();
   const rondjeNieuw = rondjeRegistreerScan(huidigeKey, entry);
-  toast('🛒 ' + (art.a || art.b) + ' op de bestellijst' + (rondjeNieuw.length ? ' · 📍 ' + rondjeNieuw.join(', ') + ' ✓' : ''));
+  toast('🛒 ' + (art.a || art.b) + (aantal != null ? ' · ' + aantal : '') + ' op de bestellijst' +
+    (rondjeNieuw.length ? ' · 📍 ' + rondjeNieuw.join(', ') + ' ✓' : ''));
   sluitPaneel();
   renderAlles();
   naSimpelScan();
@@ -1547,16 +1555,13 @@ function renderOverzicht() {
         (gedaan ? '<button type="button" class="cred-schoon" data-cred="' + esc(cred) + '" title="Bestelde regels van deze leverancier opschonen">🧹 ' + gedaan + '</button>' : '') +
         '</div>';
       if (!dicht) {
-        // simpele weergave: geen kolom Aantal, en naast het vinkje het aantal verpakkingen
-        // in plaats van het inkoopnummer
-        h += simpel
-          ? '<div class="tabel-wrap"><table class="bestel-tabel simpel"><tr><th>Artikel</th><th>Hun nummer</th><th>Locatie</th><th>Besteld</th></tr>'
-          : '<div class="tabel-wrap"><table class="bestel-tabel"><tr><th>Artikel</th><th>Hun nummer</th><th>Locatie</th><th class="num">Aantal</th><th>Besteld</th></tr>';
+        // simpele weergave: naast het vinkje het aantal verpakkingen in plaats van het inkoopnummer
+        h += '<div class="tabel-wrap"><table class="bestel-tabel"><tr><th>Artikel</th><th>Hun nummer</th><th>Locatie</th><th class="num">Aantal</th><th>Besteld</th></tr>';
         for (const it of regels) {
           const hun = it.h || it.f || '';
           h += '<tr data-key="' + esc(it.key) + '"' + (it.bsd ? ' class="rij-besteld"' : '') + '>' + artikelCel(it.a || it.b, it.o, true) +
             (hun ? '<td class="hun-kopie" data-kopieer="' + esc(hun) + '">' + esc(hun) + '</td>' : '<td>–</td>') + '<td>' + locHtml(it.l) + '</td>' +
-            (simpel ? '' : '<td class="num"><input type="text" class="ov-aantal" data-key="' + esc(it.key) + '" inputmode="numeric" maxlength="4" placeholder="–" value="' + esc(it.best) + '"></td>') +
+            '<td class="num"><input type="text" class="ov-aantal" data-key="' + esc(it.key) + '" inputmode="numeric" maxlength="4" placeholder="–" value="' + esc(it.best) + '"></td>' +
             '<td class="besteld-cel"><input type="checkbox" class="ov-besteld" data-key="' + esc(it.key) + '"' + (it.bsd ? ' checked' : '') + '>' +
             (simpel
               ? '<input type="text" class="ov-vp" data-key="' + esc(it.key) + '" inputmode="numeric" maxlength="4" placeholder="verp." value="' + esc(it.vp || '') + '">'
@@ -2394,7 +2399,8 @@ function bindEvents() {
   // simpele weergave: schuif in de header (pc) en onder Instellingen, één instelling
   $('swSimpelHeader').addEventListener('change', () => zetSimpel($('swSimpelHeader').checked));
   $('swSimpel').addEventListener('change', () => zetSimpel($('swSimpel').checked));
-  $('btnSimpelBestellen').addEventListener('click', simpelBestellen);
+  $('btnSimpelOpslaan').addEventListener('click', simpelOpslaan);
+  $('inpSimpelBestellen').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); simpelOpslaan(); } });
   $('btnSimpelAnnuleer').addEventListener('click', sluitPaneel);   // camera niet opnieuw openen
 
   $('btnSyncNu').addEventListener('click', () => { syncTelling(); syncRondje(); herprobeerArtikelen(); });
