@@ -31,12 +31,14 @@ Eén knop bovenaan voor alle leveranciers en in elke leverancierskop een knop vo
   "Het overzicht op de pc").
 - Tijdens het werk: `tests/tests.py` stond in de werkmap op CRLF (vóór `.gitattributes`); nu op LF.
 
-**Status.** v1.15.0 in de werkmap, getest, **niet gecommit**. Live staat v1.14.0.
+**Uitrol.** Timo: "het staat nog niet online?" → gecommit als `2861108` (samen met het logboek van
+9 oktober en het ASK-kopje in `CLAUDE.md`) en gepusht. Pages-run geslaagd; live melden `sw.js` en
+`app.js` 1.15.0.
+
+**Status.** v1.15.0 live en in git. Werkmap schoon op `.claude/` na.
 
 **Open punten.**
-- Committen en pushen op Timo's teken (`v1.15.0: bestellijst opschonen en besteldatum`), samen met
-  het logboek van 9 oktober en het ASK-kopje in `CLAUDE.md`.
-- Na de uitrol op de pc bekijken: knop bovenaan, bezemknop in de kop, datum onder het vinkje.
+- Op de pc en de telefoon bekijken: knop bovenaan, bezemknop in de kop, datum onder het vinkje.
 - Nog open uit de vault: v1.14.0 nalopen op de telefoon, vastgelopen Pages-run afbreken, `git stash drop`.
 
 ## 2026-10-09 — v1.14.0 gecommit en uitgerold
