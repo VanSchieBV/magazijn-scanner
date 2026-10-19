@@ -10,15 +10,19 @@ uitzondering van IT; updates komen vanzelf via de service worker). Data in de pr
 1. `LOGBOEK.md` lezen en kort samenvatten waar we gebleven waren.
 2. De projectlog uit de vault staat al in de context (SessionStart-hook "Projectlog magazijnscanner").
 3. Bij een opschoon- of reviewronde: `RAPPORT-CODEREVIEW-2026-10-08.md`.
+4. Staat er een `PLAN-*.md` met "wacht op de Go": bij **recap** noemen, kort samenvatten en om de Go
+   vragen; niet bouwen vóór de Go (zie de bouwafspraak in de algemene `CLAUDE.md` onder `~/.claude`).
 
 ## Bouwen, testen, uitrollen
 
-- Geen build. Syntaxcheck: `node --check app.js` (Node ontbreekt op de werkpc; dan overslaan, de
-  testreeks laadt de app toch in Chrome en meldt elke JavaScript-fout).
-- **Testreeks na elke wijziging:** `python tests/draai.py` (ruim 120 checks, ca. 3 minuten; headless
+- Geen build. Syntaxcheck: `node --check app.js` (werkt sinds 19 okt 2026 op de werkpc; ontbreekt
+  Node, dan overslaan, de testreeks laadt de app toch in Chrome en meldt elke JavaScript-fout).
+- **Testreeks na elke wijziging:** `python tests/draai.py` (ruim 190 checks, ca. 3 minuten; headless
   Chrome met eigen tijdelijk profiel en een nep-GitHub, dus geen venster, geen echt token, geen echte
   data). Alleen een deel: `python tests/draai.py t_a4`. Nieuwe functionaliteit krijgt een test in
   `tests/tests.py`. Bij een opschoonronde waarin het uiterlijk gelijk moet blijven: `tests/visueel.py`.
+  Die vergelijkt per DOM-pad; komen er elementen bij, dan verschuiven de paden en geeft hij vooral
+  ruis. Sla de nieuwe elementen dan over in de `walk` (zie `LOGBOEK.md`, 19 okt 2026 avond).
 - Lokaal met de hand testen: `python -m http.server 8765` in de projectmap en `http://localhost:8765/`
   in de browser (dat opent een venster: eerst vragen). Testdata (token, registraties) achteraf uit
   localStorage opruimen. Het token van de localhost-kopie is een eigen token; de telefoon en de

@@ -5,7 +5,7 @@
 'use strict';
 
 // ---------- constanten ----------
-const VERSIE = '1.15.0';
+const VERSIE = '1.16.0';
 const DATA_REPO = 'VanSchieBV/magazijn-data';
 const API_BASE = 'https://api.github.com/repos/' + DATA_REPO + '/contents/';
 const SYNC_HERKANS_MS = 8000;                        // herkansing na een netwerk- of serverfout
@@ -21,7 +21,7 @@ let artikelen = [];            // [{b,a,o,c,f,h,l,v}] (+ _zoek, alleen in het ge
 let artMeta = { sha: null, bijgewerkt: '?' };   // sha en exportdatum van de geladen artikellijst
 let artIndex = new Map();      // barcode -> [artikel,...]
 let artNrIndex = new Map();    // artikelnummer (upper) -> artikel
-let telling = { items: {} };   // key -> {b,a,o,c,f,h,l,v,g,best,opm,ts,onb,bsd,ink,kl} of grafsteen {b,ts,del}
+let telling = { items: {} };   // key -> {b,a,o,c,f,h,l,v,g,best,opm,ts,onb,bsd,ink,kl,bl,vp} of grafsteen {b,ts,del}
 let locFoutCache = { art: null, uitz: null, fout: [] };   // artikelen met afwijkende locatienotatie
 let uitzCache = { bron: null, set: new Set() };           // uitzonderingenlijst als Set (kleine letters)
 
@@ -924,6 +924,36 @@ function openPaneel(art, behoudBlader, key) {
   huidigArt = art;
   huidigeKey = key || sleutelVoor(art, telling.items);
   const bestaand = levend(telling.items[huidigeKey]);
+  // simpele weergave: zes regels (omschrijving, artikelcode, crediteur, fabrikant- en
+  // hun nummer, locatie en voorraad) en alleen de knoppen Bestellen en Annuleren
+  const simpel = simpelAan();
+  $('artNormaal').hidden = simpel;
+  $('artSimpelKnoppen').hidden = !simpel;
+  $('artGrid').classList.toggle('simpel', simpel);
+  if (simpel) {
+    bladerKeys = []; bladerIdx = -1;      // geen bladerpijlen in de simpele stand
+    const opLijst = bestaand && opBestellijst(bestaand);
+    const lijstBadge = opLijst ? ' <span class="badge geel">🛒 staat al op de bestellijst</span>' : '';
+    $('artKop').innerHTML = art.onb
+      ? '<div class="art-title">Onbekende code</div><div class="art-nr groot">' + esc(art.b) + lijstBadge + '</div>'
+      : '<div class="art-title">' + esc(art.o) + '</div><div class="art-nr groot">' + esc(art.a) + lijstBadge + '</div>';
+    $('artGrid').innerHTML = art.onb
+      ? veld('Gescand', esc(art.b), '', true)
+      : veld('Crediteur', esc(art.c || '–'), '', true) +
+        veld('Fabrikantnummer', art.f ? '<span class="kopieer-waarde" data-copy="' + esc(art.f) + '">' + esc(art.f) + '</span>' : '–') +
+        veld('Hun nummer', art.h ? '<span class="kopieer-waarde" data-copy="' + esc(art.h) + '">' + esc(art.h) + '</span>' : '–') +
+        veld('Locatie', esc(art.l || '–')) +
+        veld('Voorraad', esc(art.v || '0'), 'groen');
+    bindKopieKnoppen($('artGrid'));
+    $('btnSimpelBestellen').textContent = opLijst ? 'Terug naar scannen' : '✓ Bestellen, terug naar scannen';
+    $('scanIdle').hidden = true;
+    $('artPanel').hidden = false;
+    $('bladerNav').hidden = true;
+    $('uitloopBanner').hidden = true;
+    toonView('scan');
+    window.scrollTo(0, 0);
+    return;
+  }
   const besteldBadge = bestaand && bestaand.bsd ? ' <span class="badge geel">🛒 besteld ' + esc(fmtDatum.format(bestaand.bsd)) + '</span>' : '';
   if (art.onb) {
     $('artKop').innerHTML =
@@ -1087,7 +1117,7 @@ function schoonBesteld(keys) {
     const it = levend(telling.items[k]);
     if (!it || !it.bsd) continue;
     if (it.g == null && !it.opm) { leeg.push(k); continue; }
-    delete it.best; delete it.bsd; delete it.ink;
+    delete it.best; delete it.bsd; delete it.ink; delete it.bl; delete it.vp;
     it.ts = nu;
   }
   if (leeg.length) verwijderRegistraties(leeg);
@@ -1095,6 +1125,59 @@ function schoonBesteld(keys) {
   planSync();
   renderAlles();
 }
+
+// ---------- simpele weergave ----------
+// per apparaat (mgz_simpel): alleen scannen en de bestellijst, voor collega's.
+// "pc" = breed scherm (zelfde grens als de media query in style.css)
+function simpelAan() { return localStorage.getItem('mgz_simpel') === '1'; }
+function isPc() { return window.innerWidth >= 900; }
+function simpelViews() { return isPc() ? ['scan', 'lijst', 'overzicht'] : ['scan', 'lijst', 'instellingen']; }
+
+function pasSimpelToe() {
+  const aan = simpelAan();
+  document.body.classList.toggle('simpel', aan);
+  $('swSimpelHeader').checked = aan;
+  $('swSimpel').checked = aan;
+  const toegestaan = simpelViews();
+  document.querySelectorAll('nav button[data-view]').forEach(b => {
+    b.hidden = aan && !toegestaan.includes(b.dataset.view);
+  });
+}
+
+function zetSimpel(aan) {
+  localStorage.setItem('mgz_simpel', aan ? '1' : '0');
+  pasSimpelToe();
+  updateRondjeUI();   // rondje-seintje op het scanscherm hoort niet bij de simpele stand
+  if (!$('artPanel').hidden) sluitPaneel();
+  const actief = document.querySelector('.view.active').id.replace('view-', '');
+  if (aan && !simpelViews().includes(actief)) toonView('scan');
+  else renderAlles();
+  toast(aan ? 'Simpele weergave aan' : 'Simpele weergave uit');
+}
+
+// scan in de simpele stand: het artikel op de bestellijst zetten (bl = bijna leeg,
+// zonder aantal) en terug naar de scanner. Bestaande velden van de registratie blijven.
+function simpelBestellen() {
+  if (!huidigArt) return;
+  const art = huidigArt;
+  const nu = Date.now();
+  const oud = levend(telling.items[huidigeKey]);
+  if (oud && opBestellijst(oud)) { sluitPaneel(); naSimpelScan(); return; }
+  const entry = Object.assign(
+    { b: art.b, a: art.a, o: art.o, c: art.c, f: art.f, h: art.h, l: art.l, v: art.v },
+    oud || {}, { bl: nu, ts: nu });
+  if (art.onb) entry.onb = true;
+  telling.items[huidigeKey] = entry;
+  bewaarTelling();
+  planSync();
+  const rondjeNieuw = rondjeRegistreerScan(huidigeKey, entry);
+  toast('🛒 ' + (art.a || art.b) + ' op de bestellijst' + (rondjeNieuw.length ? ' · 📍 ' + rondjeNieuw.join(', ') + ' ✓' : ''));
+  sluitPaneel();
+  renderAlles();
+  naSimpelScan();
+}
+// met de handscanner is de camera niet nodig: gewoon direct weer scannen
+function naSimpelScan() { if ($('swDoorscannen').checked && !handscannerAan()) startScanner(); }
 
 // ---------- uitlooplijst ----------
 // artikelen die niet meer gebruikt worden: bij het scannen verschijnt een
@@ -1163,8 +1246,9 @@ function systeemVoorraad(it) { return parseInt(it.v, 10) || 0; }
 // telverschil: geteld wijkt af van de systeemvoorraad (onbekende codes tellen niet mee)
 function heeftVerschil(it) { return !it.onb && it.g != null && Number(it.g) !== systeemVoorraad(it); }
 
-function veld(lbl, val, klasse) {
-  return '<div class="art-field"><div class="lbl">' + lbl + '</div><div class="val ' + (klasse || '') + '">' + val + '</div></div>';
+// vol = veld over de volle breedte van het raster (simpel artikelscherm)
+function veld(lbl, val, klasse, vol) {
+  return '<div class="art-field' + (vol ? ' vol' : '') + '"><div class="lbl">' + lbl + '</div><div class="val ' + (klasse || '') + '">' + val + '</div></div>';
 }
 
 function sluitPaneel() {
@@ -1228,22 +1312,27 @@ function slaOp(kloptDirect) {
 
 // ---------- lijst-weergave ----------
 function maakLijstItem(it) {
+  // simpele weergave: alleen de bestelstatus, geen klaar-vinkje en geen verwijderknop
+  const simpel = simpelAan();
   let badgeHtml = '';
-  if (it.onb) badgeHtml = '<span class="badge rood">onbekend</span>';
+  if (simpel) { /* geen geteld-, verschil- of uitloopbadge */ }
+  else if (it.onb) badgeHtml = '<span class="badge rood">onbekend</span>';
   else if (heeftVerschil(it)) badgeHtml = '<span class="badge rood">' + esc(it.g) + ' i.p.v. ' + systeemVoorraad(it) + '</span>';
   else if (it.g != null) badgeHtml = '<span class="badge groen">✓ ' + esc(it.g) + '</span>';
-  if (it.bsd) badgeHtml += ' <span class="badge groen">🛒 besteld' + (it.best > 0 ? ' ' + esc(it.best) : '') + ' · ' + esc(fmtDatum.format(it.bsd)) + '</span>';
-  else if (it.best != null && it.best > 0) badgeHtml += ' <span class="badge geel">bestel ' + esc(it.best) + '</span>';
-  if (uitloopVanArtikel(artikelVanRegistratie(it))) badgeHtml = '<span class="badge rood">📉 uitloop</span> ' + badgeHtml;
+  if (simpel && it.bsd) badgeHtml = '<span class="badge groen">🛒 besteld · ' + esc(fmtDatum.format(it.bsd)) + '</span>';
+  else if (it.bsd) badgeHtml += ' <span class="badge groen">🛒 besteld' + (it.best > 0 ? ' ' + esc(it.best) : '') + ' · ' + esc(fmtDatum.format(it.bsd)) + '</span>';
+  else if (opBestellijst(it)) badgeHtml += ' <span class="badge geel">bestel' + (it.best > 0 ? ' ' + esc(it.best) : '') + '</span>';
+  if (!simpel && uitloopVanArtikel(artikelVanRegistratie(it))) badgeHtml = '<span class="badge rood">📉 uitloop</span> ' + badgeHtml;
   const el = document.createElement('div');
-  el.className = 'item' + (it.kl ? ' klaar' : '');
-  el.innerHTML = '<input type="checkbox" class="lijst-klaar" aria-label="Klaar"' + (it.kl ? ' checked' : '') + '>' +
+  el.className = 'item' + (it.kl && !simpel ? ' klaar' : '');
+  el.innerHTML = (simpel ? '' : '<input type="checkbox" class="lijst-klaar" aria-label="Klaar"' + (it.kl ? ' checked' : '') + '>') +
     '<div class="mid"><div class="t1">' + esc(it.o) + '</div>' +
     '<div class="t2">' + esc(it.a || it.b) + ' · ' + locHtml(it.l) +
     (it.opm ? ' · 💬 ' + esc(it.opm) : '') + '</div></div>' +
     '<div class="right">' + badgeHtml + '</div>' +
-    (it.kl ? '<button class="lijst-del" aria-label="Verwijderen">✕</button>' : '');
+    (it.kl && !simpel ? '<button class="lijst-del" aria-label="Verwijderen">✕</button>' : '');
   el.onclick = () => openPaneel(artikelVanRegistratie(it), false, it.key);
+  if (simpel) return el;
   // afvinken: item wordt als "klaar" gemarkeerd en zakt naar de klaar-sectie
   const cb = el.querySelector('.lijst-klaar');
   cb.onclick = (e) => e.stopPropagation();
@@ -1281,8 +1370,10 @@ function updateNavBadge() {
 
 function renderLijst() {
   const items = registraties().sort((a, b2) => (b2.ts || 0) - (a.ts || 0));
-  const actief = items.filter(it => !it.kl);
-  const klaar = items.filter(it => it.kl);
+  // simpele weergave: geen blok Klaar, alle regels op scanvolgorde
+  const simpel = simpelAan();
+  const actief = simpel ? items : items.filter(it => !it.kl);
+  const klaar = simpel ? [] : items.filter(it => it.kl);
   $('lijstSub').textContent = items.length
     ? items.length + ' artikelen geregistreerd' + (klaar.length ? ' · ' + klaar.length + ' klaar' : '')
     : 'Nog niets gescand';
@@ -1317,6 +1408,9 @@ function credVan(it) {
   return artikelVanRegistratie(it).c || it.c || '';
 }
 
+// staat deze regel op de bestellijst: een bestelaantal, of "bijna leeg" uit de simpele stand
+function opBestellijst(it) { return (it.best != null && it.best > 0) || !!it.bl; }
+
 function bewaarOvDicht() { localStorage.setItem('mgz_ov_dicht', JSON.stringify(Array.from(ovDicht))); }
 
 function zetOvFilter(sectie) {
@@ -1331,6 +1425,15 @@ function pasOvFilterToe() {
     bestellen: 'Alleen te bestellen', opmerkingen: 'Alleen opmerkingen',
     uitloop: 'Alleen uitloop'
   };
+  // simpele weergave: alleen de bestellijst, filters gelden niet
+  if (simpelAan()) {
+    $('kaartGeteld').hidden = true;
+    $('kaartVerschillen').hidden = true;
+    $('kaartBestellen').hidden = false;
+    $('kaartOpmerkingen').hidden = true;
+    $('ovFilterMelding').hidden = true;
+    return;
+  }
   // zonder filter blijft Geteld verborgen: die lijst is lang en staat al in Gescand
   $('kaartGeteld').hidden = ovFilter !== 'geteld';
   $('kaartVerschillen').hidden = !(ovFilter === null || ovFilter === 'verschillen');
@@ -1359,26 +1462,32 @@ function artikelCel(nr, oms, kopieerbaar) {
 
 function renderOverzicht() {
   const items = registraties();
+  const simpel = simpelAan();
   const verschillen = items.filter(heeftVerschil);
-  const bestellen = items.filter(it => it.best != null && it.best > 0);
+  const bestellen = items.filter(opBestellijst);
   const opmerkingen = items.filter(it => it.opm);
   const geteld = items.filter(it => it.g != null);
+  $('ovUitleg').hidden = !simpel;
 
   // de vier tegels zijn filters: tik = alleen die sectie, nog eens tikken = alles
+  // (simpele weergave: geen tegels)
   const tegel = (sectie, kleur, n, label) =>
     '<button type="button" class="stat' + (kleur ? ' ' + kleur : '') +
     (ovFilter === sectie ? ' sel' : '') + '" data-sectie="' + sectie + '">' +
     '<div class="n">' + n + '</div><div class="l">' + label + '</div></button>';
   const uitloopTotaal = Object.values(rondje.uitloop || {}).filter(u => !u.del).length;
-  $('ovStats').innerHTML =
-    tegel('geteld', 'groen', geteld.length, 'Geteld') +
-    tegel('verschillen', 'rood', verschillen.length, 'Telverschillen') +
-    tegel('bestellen', 'geel', bestellen.length, 'Te bestellen') +
-    tegel('opmerkingen', '', opmerkingen.length, 'Opmerkingen') +
-    tegel('uitloop', 'rood', uitloopTotaal, '📉 Uitloop');
-  $('ovStats').querySelectorAll('[data-sectie]').forEach(b => {
-    b.onclick = () => zetOvFilter(b.getAttribute('data-sectie'));
-  });
+  if (simpel) $('ovStats').innerHTML = '';
+  else {
+    $('ovStats').innerHTML =
+      tegel('geteld', 'groen', geteld.length, 'Geteld') +
+      tegel('verschillen', 'rood', verschillen.length, 'Telverschillen') +
+      tegel('bestellen', 'geel', bestellen.length, 'Te bestellen') +
+      tegel('opmerkingen', '', opmerkingen.length, 'Opmerkingen') +
+      tegel('uitloop', 'rood', uitloopTotaal, '📉 Uitloop');
+    $('ovStats').querySelectorAll('[data-sectie]').forEach(b => {
+      b.onclick = () => zetOvFilter(b.getAttribute('data-sectie'));
+    });
+  }
   pasOvFilterToe();
 
   // geteld — alleen zichtbaar als er op de tegel Geteld is getikt
@@ -1438,15 +1547,22 @@ function renderOverzicht() {
         (gedaan ? '<button type="button" class="cred-schoon" data-cred="' + esc(cred) + '" title="Bestelde regels van deze leverancier opschonen">🧹 ' + gedaan + '</button>' : '') +
         '</div>';
       if (!dicht) {
-        h += '<div class="tabel-wrap"><table class="bestel-tabel"><tr><th>Artikel</th><th>Hun nummer</th><th>Locatie</th><th class="num">Aantal</th><th>Besteld</th></tr>';
+        // simpele weergave: geen kolom Aantal, en naast het vinkje het aantal verpakkingen
+        // in plaats van het inkoopnummer
+        h += simpel
+          ? '<div class="tabel-wrap"><table class="bestel-tabel simpel"><tr><th>Artikel</th><th>Hun nummer</th><th>Locatie</th><th>Besteld</th></tr>'
+          : '<div class="tabel-wrap"><table class="bestel-tabel"><tr><th>Artikel</th><th>Hun nummer</th><th>Locatie</th><th class="num">Aantal</th><th>Besteld</th></tr>';
         for (const it of regels) {
           const hun = it.h || it.f || '';
           h += '<tr data-key="' + esc(it.key) + '"' + (it.bsd ? ' class="rij-besteld"' : '') + '>' + artikelCel(it.a || it.b, it.o, true) +
             (hun ? '<td class="hun-kopie" data-kopieer="' + esc(hun) + '">' + esc(hun) + '</td>' : '<td>–</td>') + '<td>' + locHtml(it.l) + '</td>' +
-            '<td class="num"><input type="text" class="ov-aantal" data-key="' + esc(it.key) + '" inputmode="numeric" maxlength="4" value="' + esc(it.best) + '"></td>' +
+            (simpel ? '' : '<td class="num"><input type="text" class="ov-aantal" data-key="' + esc(it.key) + '" inputmode="numeric" maxlength="4" placeholder="–" value="' + esc(it.best) + '"></td>') +
             '<td class="besteld-cel"><input type="checkbox" class="ov-besteld" data-key="' + esc(it.key) + '"' + (it.bsd ? ' checked' : '') + '>' +
-            '<input type="text" class="ov-ink" data-key="' + esc(it.key) + '" inputmode="numeric" maxlength="8" value="' + esc(it.ink || '') + '">' +
-            (it.bsd ? '<div class="besteld-datum">besteld ' + esc(fmtDatum.format(it.bsd)) + '</div>' : '') + '</td></tr>';
+            (simpel
+              ? '<input type="text" class="ov-vp" data-key="' + esc(it.key) + '" inputmode="numeric" maxlength="4" placeholder="verp." value="' + esc(it.vp || '') + '">'
+              : '<input type="text" class="ov-ink" data-key="' + esc(it.key) + '" inputmode="numeric" maxlength="8" value="' + esc(it.ink || '') + '">') +
+            (it.bsd ? '<div class="besteld-datum">besteld ' + esc(fmtDatum.format(it.bsd)) +
+              (!simpel && it.vp ? ' · ' + esc(it.vp) + ' verp.' : '') + '</div>' : '') + '</td></tr>';
         }
         h += '</table></div>';
       }
@@ -1500,8 +1616,11 @@ function renderOverzicht() {
       inp.onclick = (e) => e.stopPropagation();
       inp.onblur = () => { if (renderUitgesteld) renderAlles(); };
       inp.onchange = () => {
+        const key = inp.getAttribute('data-key');
         const n = parseInt(inp.value, 10);
-        if (!isNaN(n) && n > 0) zetItem(inp.getAttribute('data-key'), it => { it.best = n; });
+        if (!isNaN(n) && n > 0) zetItem(key, it => { it.best = n; });
+        // regel uit de simpele stand ("bijna leeg"): leeg = weer zonder aantal op de lijst
+        else if (telling.items[key] && telling.items[key].bl) zetItem(key, it => { delete it.best; });
         else { toast('Aantal moet minimaal 1 zijn — pas het aan via het artikel zelf om te verwijderen', true); inp.blur(); renderAlles(); }
       };
     });
@@ -1509,7 +1628,8 @@ function renderOverzicht() {
       cb.onclick = (e) => e.stopPropagation();
       cb.onchange = () => {
         const aan = cb.checked;
-        zetItem(cb.getAttribute('data-key'), it => {
+        const key = cb.getAttribute('data-key');
+        zetItem(key, it => {
           if (aan) {
             it.bsd = Date.now();
             // het veldje ernaast automatisch vullen met het bestelde aantal
@@ -1517,6 +1637,26 @@ function renderOverzicht() {
           } else delete it.bsd;
         });
         toast(aan ? '🛒 Gemarkeerd als besteld' : 'Bestelmarkering verwijderd');
+        // simpele weergave: na het aanvinken meteen het aantal verpakkingen invullen
+        if (aan && simpelAan()) {
+          const vp = $('ovBestellen').querySelector('.ov-vp[data-key="' + CSS.escape(key) + '"]');
+          if (vp) vp.focus();
+        }
+      };
+    });
+    $('ovBestellen').querySelectorAll('.ov-vp').forEach(inp => {
+      inp.onclick = (e) => e.stopPropagation();
+      inp.onblur = () => { if (renderUitgesteld) renderAlles(); };
+      inp.onchange = () => {
+        const key = inp.getAttribute('data-key');
+        const v = inp.value.trim();
+        if (v === '') zetItem(key, it => { delete it.vp; });
+        else if (/^\d+$/.test(v) && parseInt(v, 10) >= 1) zetItem(key, it => { it.vp = parseInt(v, 10); });
+        else {
+          toast('Aantal verpakkingen moet een getal zijn', true);
+          const it = telling.items[key];
+          inp.value = it && it.vp ? it.vp : '';
+        }
       };
     });
     $('ovBestellen').querySelectorAll('.ov-ink').forEach(inp => {
@@ -1548,7 +1688,7 @@ function renderOverzicht() {
   // altijd de complete lijst, ook via de tegel bovenin te openen
   const uitloopItems = Object.entries(rondje.uitloop || {}).filter(x => !x[1].del)
     .sort((a, b) => vergelijkLoc(a[1].l, b[1].l));
-  $('kaartUitloop').hidden = !(ovFilter === 'uitloop' || (ovFilter === null && uitloopItems.length > 0));
+  $('kaartUitloop').hidden = simpel || !(ovFilter === 'uitloop' || (ovFilter === null && uitloopItems.length > 0));
   if (!uitloopItems.length) {
     $('ovUitloop').innerHTML = '<div class="leeg-melding">Niets gemarkeerd als uitloop</div>';
   } else {
@@ -1572,13 +1712,14 @@ function renderOverzicht() {
 function downloadScanlijst() {
   const items = registraties().sort((a, b) => vergelijkLoc(a.l, b.l));
   if (!items.length) { toast('Nog niets geteld', true); return; }
-  const kol = ['Barcode','Artikelnummer','Korte omschrijving','Fabrikantcode','Hun nummer','Locatie','Locatienotatie','Tech. Voorraad','Geteld','Crediteur','Bestellen','Besteld','Inkoopnummer','Uitloop','Opmerking'];
+  const kol = ['Barcode','Artikelnummer','Korte omschrijving','Fabrikantcode','Hun nummer','Locatie','Locatienotatie','Tech. Voorraad','Geteld','Crediteur','Bestellen','Besteld','Inkoopnummer','Bijna leeg','Verpakkingen','Uitloop','Opmerking'];
   const regels = [kol.join(';')];
   for (const it of items) {
     regels.push(csvRegel([it.b, it.a, it.o, it.f, it.h, it.l,
       it.l && !locNotatieOk(it.l) ? 'afwijkend' : '', it.v,
       it.g != null ? it.g : '', credVan(it), it.best != null ? it.best : '',
-      it.bsd ? datumIso(it.bsd) : '', it.ink || '', uitloopVanArtikel(artikelVanRegistratie(it)) ? 'ja' : '', it.opm]));
+      it.bsd ? datumIso(it.bsd) : '', it.ink || '', it.bl ? datumIso(it.bl) : '', it.vp || '',
+      uitloopVanArtikel(artikelVanRegistratie(it)) ? 'ja' : '', it.opm]));
   }
   downloadCsv('Scanlijst ' + new Date().toISOString().slice(0, 10) + '.csv', regels);
 }
@@ -1662,6 +1803,7 @@ function rondjeRegistreerScan(key, entry) {
     g: entry.g != null ? entry.g : null, best: entry.best != null ? entry.best : null,
     opm: entry.opm || '', bsd: entry.bsd ? 1 : 0
   };
+  if (entry.bl) act.scans[key].bl = 1;   // "bijna leeg" uit de simpele stand
   const nieuw = [];
   if (entry.l) {
     for (const [id, item] of routeItems()) {
@@ -1860,7 +2002,8 @@ function updateRondjeUI() {
 
   // hint op het scanscherm
   const hint = $('rondjeHint');
-  if (rondje.actief) {
+  if (simpelAan()) hint.hidden = true;   // simpele weergave: geen rondje-seintje
+  else if (rondje.actief) {
     const items = routeItems();
     const gedaan = items.filter(([id]) => { const c = checkVan(rondje.actief, id); return c && c.w !== 'skip'; }).length;
     hint.textContent = '📍 Rondje bezig · ' + gedaan + ' van ' + items.length + ' — tik voor de lijst';
@@ -2096,7 +2239,7 @@ async function laadHistScans(hs) {
   let h = '<div class="tussenkop ruim">Geregistreerd tijdens dit rondje · ' + vol.scans.length + '</div>';
   for (const s of vol.scans) {
     const badges = (s.g != null ? '<span class="badge groen">✓ ' + esc(s.g) + '</span> ' : '') +
-      (s.best ? '<span class="badge geel">bestel ' + esc(s.best) + '</span>' : '');
+      (opBestellijst(s) ? '<span class="badge geel">bestel' + (s.best > 0 ? ' ' + esc(s.best) : '') + '</span>' : '');
     h += '<div class="item vast"><div class="mid"><div class="t1">' + esc(s.o || s.b) + '</div>' +
       '<div class="t2">' + esc(s.a || s.b) + ' · ' + locHtml(s.l) +
       (s.opm ? ' · 💬 ' + esc(s.opm) : '') + '</div></div><div class="right">' + badges + '</div></div>';
@@ -2143,7 +2286,7 @@ function toonView(naam) {
 // andere zodra ze geopend worden. De teller in de navigatie loopt altijd mee.
 function renderAlles() {
   const a = document.activeElement;
-  if (a && a.matches && a.matches('.ov-aantal, .ov-ink')) { renderUitgesteld = true; return; }
+  if (a && a.matches && a.matches('.ov-aantal, .ov-ink, .ov-vp')) { renderUitgesteld = true; return; }
   renderUitgesteld = false;
   updateNavBadge();
   if ($('view-lijst').classList.contains('active')) renderLijst();
@@ -2247,6 +2390,12 @@ function bindEvents() {
   $('btnUitloop').addEventListener('click', wisselUitloop);
   $('btnVorig').addEventListener('click', () => blader(-1));
   $('btnVolgend').addEventListener('click', () => blader(1));
+
+  // simpele weergave: schuif in de header (pc) en onder Instellingen, één instelling
+  $('swSimpelHeader').addEventListener('change', () => zetSimpel($('swSimpelHeader').checked));
+  $('swSimpel').addEventListener('change', () => zetSimpel($('swSimpel').checked));
+  $('btnSimpelBestellen').addEventListener('click', simpelBestellen);
+  $('btnSimpelAnnuleer').addEventListener('click', sluitPaneel);   // camera niet opnieuw openen
 
   $('btnSyncNu').addEventListener('click', () => { syncTelling(); syncRondje(); herprobeerArtikelen(); });
   $('btnCsv').addEventListener('click', downloadScanlijst);
@@ -2420,6 +2569,7 @@ function init() {
   $('selRondjeDag').value = localStorage.getItem('mgz_rondjedag') || '';
   pasScanIndelingToe();
   pasHandscannerToe();
+  pasSimpelToe();
   toonSetupBanner();
   updateArtInfo();
   updateNavBadge();

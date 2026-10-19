@@ -3,6 +3,105 @@
 Nieuwste sessie bovenaan. Oudere geschiedenis staat in git (`git log --oneline`) en in de vault
 (`NoteFlow\projecten\MagazijnScanner\Verleden.md`).
 
+## 2026-10-19 (avond) — v1.16.0: simpele weergave gebouwd (Opus), niet gecommit
+
+**Aanleiding.** Timo: `recap`, daarna "go" op `PLAN-simpele-weergave.md`. Gebouwd door Opus
+volgens het plan.
+
+**Gedaan.**
+- `index.html`: schuif in de header (`.header-simpel`, `#swSimpelHeader`); telvelden en knoppen van
+  het artikelpaneel in `#artNormaal`, daarna `#artSimpelKnoppen` (Bestellen / Annuleren); uitleg
+  `#ovUitleg` (vijf stappen) boven de bestellijst; `id="ovKnoppen"` op de CSV-rij; kaart
+  `#kaartSimpel` (Weergave) bovenaan Instellingen.
+- `style.css`: blok "Simpele weergave" (header-schuif alleen vanaf 900 px, verbergen via
+  `body.simpel`, uitleg, simpele besteltabel, `.art-nr.groot`, `.art-grid.simpel`, `.art-field.vol`);
+  `input.ov-vp` bij de bestaande invoerstijl.
+- `app.js`: sectie "simpele weergave" na `schoonBesteld` (`simpelAan`, `isPc`, `simpelViews`,
+  `pasSimpelToe`, `zetSimpel`, `simpelBestellen`, `naSimpelScan`); `opBestellijst(it)` in de sectie
+  overzicht en overal gebruikt waar "te bestellen" bepaald wordt; simpele tak in `openPaneel`;
+  `veld()` met vierde parameter `vol`; Gescand zonder klaar-vinkje/blok Klaar en met alleen
+  bestelbadges; overzicht zonder tegels, filters en andere kaarten, besteltabel zonder Aantal en met
+  verpakkingenveld (focus na het vinkje); normaal: leeg aantalveld bij een `bl`-regel (leegmaken =
+  `best` weg), "· n verp." onder het vinkje; CSV-kolommen Bijna leeg en Verpakkingen;
+  `schoonBesteld` wist ook `bl` en `vp`; rondje-seintje weg in de simpele stand; `renderAlles`
+  wacht ook op `.ov-vp`. Versie 1.16.0 (`app.js` en `sw.js`).
+- Tests: `t_laden` op 1.16.0; nieuw `t_simpel_pc` (34 checks) en `t_simpel_telefoon` (13 checks).
+- Documentatie: README (gebruik, datamodel `bl`/`vp`, `mgz_simpel`), INSTRUCTIES.md (kopje
+  "Simpele weergave (voor collega's)"), ASK-kennis (blok "Bijna leeg scannen en bestellen" en twee
+  vragen), `CLAUDE.md` (aantal checks, Node werkt, tip bij `visueel.py`), plan op GEBOUWD.
+
+**Afwijkingen van het plan.**
+1. Header-schuif: `<label class="header-simpel">` met tekst én een `<span class="switch">` erin,
+   in plaats van `<label class="switch header-simpel">`. `.switch` heeft een vaste breedte van
+   52 px en een absolute track over het hele label; zo zou de track over de tekst "Simpel" vallen.
+2. Header-schuif met `margin: -1px 12px -1px auto`: zonder die -1px werd de header op de pc 2 px
+   hoger (schuif 30 px, statuschip 28 px) en schoof in de normale weergave alles 2 px omlaag.
+3. `zetSimpel` roept ook `updateRondjeUI()` aan, zodat het rondje-seintje meteen verdwijnt of
+   terugkomt bij het omzetten.
+4. Gescand in de simpele stand: de subtitel zonder "· n klaar" (er is daar geen blok Klaar).
+5. Een rondje-scan krijgt `bl: 1` als hij uit de simpele stand komt, zodat de badge "bestel" in de
+   rondje-historie via `opBestellijst` klopt. De rondje-CSV is ongewijzigd.
+6. `t_simpel_pc` stap 5 zo uitgewerkt: simpel starten en 222 scannen, uitzetten, 111 en 444 gewoon
+   registreren, weer aanzetten. Extra checks: een simpele scan van 444 houdt de opmerking,
+   ongeldige verpakkingen, sync van `bl`/`vp`, aantal invullen en leegmaken bij een `bl`-regel,
+   opschonen wist `bl`/`vp` bij een regel met opmerking. `t_simpel_telefoon` extra: scan telt mee
+   in een lopend rondje, seintje verborgen, aanzetten vanaf Overzicht gaat naar Scannen.
+
+**Testresultaten.** `node --check app.js` OK. Testreeks **191/191** (144 bestaand + 47 nieuw),
+na de header-correctie opnieuw **191/191**. `tests/visueel.py` tegen de vorige commit, met de
+nieuwe elementen overgeslagen en `#artNormaal` platgeslagen: zonder `mgz_simpel` alleen
+animatieruis (opacity) en een hogere Instellingen-pagina door de nieuwe kaart; verder pixel-gelijk
+op 412 en 1280 px. Schermafdrukken (headless, eigen profiel): pc-bestellijst simpel met uitleg en
+twee leveranciers, artikelscherm (zes regels in de juiste volgorde, ook "staat al op de
+bestellijst"), Gescand, scanscherm en Instellingen op de telefoon. Alles in beeld, geen horizontale
+scrollbalk, geen JavaScript-fouten.
+
+**Gevonden, niet opgelost (buiten het plan).** De rondje-CSV zet sinds v1.15.0 `1970-01-01` in de
+kolom Besteld: een rondje-scan bewaart `bsd` als vlag (1), de CSV maakt er een datum van. Vault-issue
+"Rondje-CSV toont 1970-01-01 in de kolom Besteld".
+
+**Aandachtspunt.** In de simpele weergave toont Instellingen alleen de schuif, ook als de
+setupbanner (geen token) naar Instellingen verwijst. Een token invullen kan dus alleen met de
+simpele weergave uit; dat staat in INSTRUCTIES.md.
+
+**Status.** v1.16.0 gebouwd in de werkmap, **niet gecommit en niet gepusht**. Plan: GEBOUWD,
+nagekeken: nee.
+
+**Open punten.**
+- Nakijken door Fable (`/clear`, Fable, `recap`): diff van `app.js` (`openPaneel`,
+  `simpelBestellen`, `renderOverzicht`) en de testuitslag. Daarna plan afsluiten in de vault.
+- Op Timo's verzoek committen en pushen (`v1.16.0: simpele weergave`), daarna op de pc en de
+  scanner nalopen.
+- Rondje-CSV-fout (vault-issue).
+- Nog open uit de vault: v1.14.0/v1.15.0 nalopen op de telefoon, vastgelopen Pages-run afbreken,
+  `git stash drop`.
+
+## 2026-10-19 (middag) — Bouwplan simpele weergave (v1.16.0), wacht op de Go
+
+**Aanleiding.** Timo: "Nu een grotere opdracht. Nog niets bouwen. Eerst nadenken." Collega's moeten
+de app zonder uitleg kunnen gebruiken: scannen wat bijna leeg is, en op de pc per leverancier
+bestellen. Daarvoor komt een schuif "Simpele weergave" (per apparaat) die alles verbergt wat daar
+niet voor nodig is. Uit = de app zoals nu.
+
+**Gedaan.** Code bekeken (navigatie, header, overzicht, artikelscherm, instellingen) en vijf
+keuzes aan Timo voorgelegd. Zijn antwoorden: knop heet "✓ Bestellen, terug naar scannen"; al op de
+lijst = melding + "Terug naar scannen"; een scan slaat géén aantal op (nieuw veld `bl`); de
+opschoonknoppen blijven in de simpele weergave; de uitleg bovenaan in korte stappen. Omvang ruim
+boven de bouwgrens, dus volgens de afspraak van 19-10: Fable schrijft het plan, Opus bouwt.
+Resultaat: `PLAN-simpele-weergave.md` (beslissingen B1–B11, datamodel `bl`/`vp`, per bestand de
+wijzigingen, twee nieuwe tests, controle, verboden). In de vault: plan "Simpele weergave bouwen
+(v1.16.0)" en drie beslissingen. `CLAUDE.md`: leesvolgorde punt 4 (PLAN bij recap noemen en om de
+Go vragen).
+
+**Status.** v1.15.0 live en in git. Bouwplan klaar, **wacht op de Go**. Werkmap: het plan,
+`CLAUDE.md` en dit logboek nog niet gecommit.
+
+**Open punten.**
+- Timo: `/clear`, Opus kiezen, `recap`, Go geven. Opus bouwt volgens het plan en vraagt daarna om
+  ready2clear; Fable kijkt na.
+- Nog open uit de vault: v1.14.0/v1.15.0 nalopen op de telefoon, vastgelopen Pages-run afbreken,
+  `git stash drop`.
+
 ## 2026-10-19 — v1.15.0: bestellijst opschonen en besteldatum
 
 **Aanleiding.** Timo: "controleer NoteFlow voor plannen, ideeën en bugs", daarna "ik wil dat je 1

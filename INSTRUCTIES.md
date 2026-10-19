@@ -91,6 +91,32 @@ Het token wordt alleen lokaal op het apparaat bewaard.
   (ZOLDER, WPK, Oliehok, …) zet je daar op de uitzonderingenlijst — die tellen
   als goed en krijgen geen ⚠.
 
+## Simpele weergave (voor collega's)
+
+Een schuif die de app terugbrengt tot twee taken: in het magazijn scannen wat bijna op is, en op
+de pc per leverancier bestellen. Al het andere (tellen, telverschillen, opmerkingen, uitloop,
+rondje, CSV, afronden) is dan verborgen. De schuif geldt alleen voor het apparaat waarop je hem
+omzet; zet je hem uit, dan is de app weer precies zoals hij was.
+
+- **Waar staat de schuif?** Op de pc rechtsboven in de kop van elke pagina (**Simpel**). Op de
+  scanner of telefoon bovenaan **Instellingen** (*Weergave → Simpele weergave*).
+- **Scanner:** zichtbaar zijn Scannen, Gescand en Instellingen (met alleen de schuif en het
+  versienummer). Scan een artikel dat bijna op is: je ziet omschrijving, artikelcode, leverancier,
+  fabrikantnummer, hun nummer, locatie en voorraad. Tik **✓ Bestellen, terug naar scannen**: het
+  artikel staat op de bestellijst (zonder aantal) en je kunt meteen verder scannen. **Annuleren**
+  legt niets vast. Staat het artikel al op de lijst, dan meldt de app dat en heet de knop
+  **Terug naar scannen**.
+- **Pc:** zichtbaar zijn Scannen, Gescand en Overzicht. Het overzicht toont alleen de bestellijst
+  per leverancier, met bovenaan een korte uitleg in stappen. Kopieer *Hun nummer* met het
+  ⧉-icoontje, bestel in de webshop van de leverancier, vink **Besteld** aan en vul in hoeveel
+  **verpakkingen** je besteld hebt (een doos van 200 boutjes is 1). De knoppen 🧹 om bestelde
+  regels op te schonen blijven ook hier staan.
+- **Vooraf instellen (Timo):** de handscanner-stand zet je aan vóórdat je de simpele weergave
+  aanzet; het schuifje Handscanner is daarna verborgen, maar de stand blijft gelden. Hetzelfde
+  geldt voor het token: in de simpele weergave toont Instellingen alleen de schuif, dus moet er
+  een nieuw token in, zet de simpele weergave dan even uit. Een lopend rondje telt de scans
+  gewoon mee.
+
 ## Wekelijks rondje
 
 - **Rondje** (tabblad) → de vaste controleroute door het magazijn.

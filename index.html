@@ -14,6 +14,10 @@
 
 <header>
   <h1>Magazijn<span class="accent">Scanner</span></h1>
+  <label class="header-simpel" title="Simpele weergave">
+    <span class="switch-lbl">Simpel</span>
+    <span class="switch"><input type="checkbox" id="swSimpelHeader"><span class="track"></span></span>
+  </label>
   <div class="status-chip"><span class="status-dot" id="statusDot"></span><span id="statusTxt">–</span></div>
 </header>
 
@@ -70,6 +74,7 @@
         <div class="uitloop-banner" id="uitloopBanner" hidden>📉 Uitloop — wordt niet meer aangevuld, op = op</div>
         <div class="art-grid" id="artGrid"></div>
 
+        <div id="artNormaal">
         <div class="telrij">
           <div class="telveld sel" id="veldBestellen">
             <div class="lbl">Bestellen</div>
@@ -110,6 +115,12 @@
         <div class="btn-row">
           <button class="btn stil rood" id="btnVerwijder" hidden>🗑 Uit controle verwijderen</button>
           <button class="btn stil" id="btnAnnuleer">Annuleren</button>
+        </div>
+        </div>
+        <!-- simpele weergave: alleen op de bestellijst zetten -->
+        <div class="btn-row" id="artSimpelKnoppen" hidden>
+          <button class="btn primair" id="btnSimpelBestellen">✓ Bestellen, terug naar scannen</button>
+          <button class="btn stil" id="btnSimpelAnnuleer">Annuleren</button>
         </div>
       </div>
     </div>
@@ -157,6 +168,16 @@
     </div>
     <div class="card" id="kaartBestellen">
       <h2 class="geel">Bestellen</h2>
+      <div class="uitleg-simpel" id="ovUitleg" hidden>
+        <div class="uitleg-titel">Zo bestel je</div>
+        <ol>
+          <li>Dit zijn de artikelen die in het magazijn gescand zijn omdat ze bijna op zijn, per leverancier.</li>
+          <li>Klik op het kopieer-icoontje <b>⧉</b> achter een nummer. Het nummer staat dan op het klembord; je hoeft niets met de muis te selecteren.</li>
+          <li>Ga naar de webshop van de leverancier en log daar in.</li>
+          <li>Plak het nummer uit de kolom <b>Hun nummer</b> in de webshop en bestel het artikel.</li>
+          <li>Besteld? Vink het vakje <b>Besteld</b> aan en vul in hoeveel <b>verpakkingen</b> je hebt besteld. Een doos van 200 boutjes is 1.</li>
+        </ol>
+      </div>
       <div id="ovBestellen"></div>
     </div>
     <div class="card" id="kaartOpmerkingen">
@@ -167,13 +188,24 @@
       <h2 class="rood">📉 Uitloop</h2>
       <div class="tabel-wrap" id="ovUitloop"></div>
     </div>
-    <div class="btn-row">
+    <div class="btn-row" id="ovKnoppen">
       <button class="btn stil" id="btnCsv">⬇ Download Scanlijst (CSV)</button>
     </div>
   </section>
 
   <!-- ============ INSTELLINGEN ============ -->
   <section class="view" id="view-instellingen">
+    <div class="card" id="kaartSimpel">
+      <h2>Weergave</h2>
+      <div class="switch-row">
+        <div>
+          <div class="switch-titel">Simpele weergave</div>
+          <div class="bijschrift">Alleen scannen en de bestellijst, voor collega's. Geldt voor dit apparaat.</div>
+        </div>
+        <label class="switch"><input type="checkbox" id="swSimpel"><span class="track"></span></label>
+      </div>
+    </div>
+
     <div class="card">
       <h2>Koppeling</h2>
       <div class="set-row">

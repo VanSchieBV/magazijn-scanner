@@ -18,6 +18,14 @@ telverschillen en bestellingen per crediteur (met besteldatum en knoppen om best
 alles of per leverancier), **Instellingen** token, artikellijst en werkwijze.
 "Controle afronden" archiveert de controle in de cloud en maakt de lijst leeg, op alle apparaten.
 
+**Simpele weergave** (sinds v1.16.0, per apparaat): een schuif in de header (alleen op de pc, vanaf
+900 px breed) en bovenaan Instellingen. Aan = alleen wat collega's nodig hebben. Op de scanner:
+Scannen, Gescand en Instellingen (alleen de schuif); een scan opent een kort artikelscherm met
+**✓ Bestellen, terug naar scannen**, dat het artikel zonder aantal op de bestellijst zet (veld `bl`).
+Op de pc: Scannen, Gescand en Overzicht, met alleen de bestellijst per leverancier, een uitleg in vijf
+stappen en naast het vinkje Besteld het aantal verpakkingen (veld `vp`). Sync, besteldatum, opschonen,
+het rondje (een scan telt mee) en de handscanner-stand lopen gewoon door. Uit = de app zoals hij was.
+
 ## Bouwen en testen
 
 Geen build-stap. Lokaal: `python -m http.server 8765` in de projectmap, dan `http://localhost:8765/`.
@@ -26,9 +34,9 @@ de apparaten de oude versie uit de cache gebruiken. Scanner: native `BarcodeDete
 anders ZXing (`zxing.min.js`, lokaal gebundeld en pas geladen als hij nodig is).
 
 **Testreeks** (sinds v1.14.0): `python tests/draai.py` start de app-server en een nep-GitHub, draait de
-echte app in headless Chrome (geen venster, eigen tijdelijk profiel) en loopt ruim 120 checks na: sync
+echte app in headless Chrome (geen venster, eigen tijdelijk profiel) en loopt ruim 190 checks na: sync
 tussen twee apparaten, afronden, conflicten, dubbele barcodes, handscanner, rondje, uitloop, CSV,
-overzicht en instellingen. Alleen een deel: `python tests/draai.py t_a4` (filter op testnaam). Nodig:
+overzicht, instellingen en de simpele weergave op pc en telefoon. Alleen een deel: `python tests/draai.py t_a4` (filter op testnaam). Nodig:
 Python 3, Chrome of Edge en `pip install websocket-client`; Node is niet nodig. De testdata is verzonnen
 (`tests/testdata.py`), het token is een nep-token. `tests/visueel.py` vergelijkt de berekende opmaak van
 een oude en de huidige versie (uitleg bovenin dat bestand). Let op: `tests/` staat ook op GitHub Pages;
@@ -68,7 +76,10 @@ Bestand heeft ook `bijgewerkt` (datum van de export). In het geheugen krijgt elk
 
 Registratie (`telling.json`, `items[sleutel]`): de artikelvelden plus `g` geteld, `best` bestellen,
 `opm` opmerking, `ts` tijdstempel (ms), `onb` onbekende code, `bsd` besteld-tijdstempel, `ink`
-inkoopnummer, `kl` klaar-tijdstempel, `del` grafsteen. Het bestand heeft daarnaast `afgerond` (ms):
+inkoopnummer, `kl` klaar-tijdstempel, `bl` "bijna leeg"-tijdstempel (een scan in de simpele weergave,
+zonder aantal), `vp` aantal bestelde verpakkingen (geheel getal, ingevuld in de simpele weergave op de
+pc), `del` grafsteen. Op de bestellijst staat alles met een bestelaantal óf `bl` (`opBestellijst`).
+Opschonen wist `best`, `bsd`, `ink`, `bl` en `vp`. Het bestand heeft daarnaast `afgerond` (ms):
 het laatste moment van "Controle afronden"; elk apparaat gooit zijn lokale registraties van vóór dat
 moment weg, zodat een afgeronde controle niet terugkomt.
 
@@ -89,4 +100,5 @@ naar `archief/rondje-<id>.json` moeten), `locUitz{ts,lijst}`, `gebieden{ts,lijst
 
 Per apparaat in localStorage (`mgz_*`): token, artikellijst-cache (`mgz_art`, ca. 1,2 MB van de ca. 5 MB
 die de browser toestaat; bij een volle opslag meldt de app dat), telling, rondje, handscanner,
-doorscannen, scanpositie, knop-boven, rondjesdag, ingeklapte crediteurblokken.
+doorscannen, scanpositie, knop-boven, rondjesdag, ingeklapte crediteurblokken, simpele weergave
+(`mgz_simpel`).
