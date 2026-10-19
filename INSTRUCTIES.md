@@ -69,7 +69,12 @@ Het token wordt alleen lokaal op het apparaat bewaard.
   vanzelf, zonder dat het toetsenbord omhoog komt. Het schuifje blijft op dat
   toestel aan staan.
 - **Gescand** → lijst van wat in deze controle al geregistreerd is.
-- **Overzicht** (PC) → telverschillen en bestellingen per crediteur.
+- **Overzicht** (PC) → telverschillen en bestellingen per crediteur. Zet je een regel op
+  **Besteld**, dan staat de besteldatum eronder (ook in Gescand en op het artikelscherm).
+  **🧹 Bestelde regels opschonen** (bovenaan de bestellijst) haalt alle bestelde regels uit de
+  lijst; de knop 🧹 in een leverancierskop doet dat alleen voor die leverancier. Geteld en
+  opmerkingen blijven staan; een regel zonder telling of opmerking verdwijnt helemaal uit de
+  controle. Niet-bestelde regels blijven altijd staan.
 - **Controle afronden & leegmaken** (Instellingen) → archiveert de controle in de cloud en
   begint met een schone lijst, ook op de andere apparaten. Alleen doen als de hele ronde
   klaar is. Lukt de sync vlak ervoor niet (bijv. slechte wifi), dan breekt de app het

@@ -14,7 +14,8 @@ PWA voor magazijncontrole met barcode/QR-scanner via de telefooncamera of een ha
 
 Scannen → artikelpaneel (geteld / bestellen / opmerking / besteld / uitloop) → opslaan. Tabblad
 **Gescand** toont de lopende controle, **Rondje** de wekelijkse controleroute, **Overzicht** (pc)
-telverschillen en bestellingen per crediteur, **Instellingen** token, artikellijst en werkwijze.
+telverschillen en bestellingen per crediteur (met besteldatum en knoppen om bestelde regels op te schonen,
+alles of per leverancier), **Instellingen** token, artikellijst en werkwijze.
 "Controle afronden" archiveert de controle in de cloud en maakt de lijst leeg, op alle apparaten.
 
 ## Bouwen en testen

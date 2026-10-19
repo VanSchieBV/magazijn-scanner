@@ -5,7 +5,7 @@
 'use strict';
 
 // ---------- constanten ----------
-const VERSIE = '1.14.0';
+const VERSIE = '1.15.0';
 const DATA_REPO = 'VanSchieBV/magazijn-data';
 const API_BASE = 'https://api.github.com/repos/' + DATA_REPO + '/contents/';
 const SYNC_HERKANS_MS = 8000;                        // herkansing na een netwerk- of serverfout
@@ -401,6 +401,9 @@ async function syncTellingDirect() {
   while (syncBezig) await new Promise(r => setTimeout(r, 200));
   return await syncTelling();
 }
+
+// datum jjjj-mm-dd in lokale tijd (CSV-kolom Besteld)
+function datumIso(ms) { return stempelId(new Date(ms)).slice(0, 10); }
 
 // tijdstempel-id jjjj-mm-dd_uumm (archiefnamen en rondje-id's)
 function stempelId(d) {
@@ -921,7 +924,7 @@ function openPaneel(art, behoudBlader, key) {
   huidigArt = art;
   huidigeKey = key || sleutelVoor(art, telling.items);
   const bestaand = levend(telling.items[huidigeKey]);
-  const besteldBadge = bestaand && bestaand.bsd ? ' <span class="badge geel">🛒 besteld</span>' : '';
+  const besteldBadge = bestaand && bestaand.bsd ? ' <span class="badge geel">🛒 besteld ' + esc(fmtDatum.format(bestaand.bsd)) + '</span>' : '';
   if (art.onb) {
     $('artKop').innerHTML =
       '<div class="art-title">Onbekende code <span class="badge rood">niet in artikellijst</span></div>' +
@@ -1037,7 +1040,7 @@ function updateBesteldKnop() {
   const btn = $('btnBesteld');
   const bestaand = levend(telling.items[huidigeKey]);
   if (bestaand && bestaand.bsd) {
-    btn.textContent = '🛒 Besteld ✓ — tik om ongedaan te maken';
+    btn.textContent = '🛒 Besteld ✓ ' + fmtDatum.format(bestaand.bsd) + ' — tik om ongedaan te maken';
     btn.classList.add('besteld-actief');
   } else {
     const heeftVolgende = bladerIdx >= 0 && bladerIdx < bladerKeys.length - 1;
@@ -1072,6 +1075,25 @@ function wisselBesteld() {
     (rondjeNieuw.length ? ' · 📍 ' + rondjeNieuw.join(', ') + ' ✓' : ''));
   if (bladerIdx >= 0 && bladerIdx < bladerKeys.length - 1) blader(1);
   else { updateBladerUI(); updateBesteldKnop(); }
+}
+
+// bestelde regels opschonen (knoppen in het Overzicht): bestelaantal, markering en
+// inkoopnummer gaan eraf, geteld en opmerking blijven staan. Blijft er dan niets
+// over, dan verdwijnt de registratie via een grafsteen (nooit echt wissen).
+function schoonBesteld(keys) {
+  const nu = Date.now();
+  const leeg = [];
+  for (const k of keys) {
+    const it = levend(telling.items[k]);
+    if (!it || !it.bsd) continue;
+    if (it.g == null && !it.opm) { leeg.push(k); continue; }
+    delete it.best; delete it.bsd; delete it.ink;
+    it.ts = nu;
+  }
+  if (leeg.length) verwijderRegistraties(leeg);
+  bewaarTelling();
+  planSync();
+  renderAlles();
 }
 
 // ---------- uitlooplijst ----------
@@ -1210,7 +1232,7 @@ function maakLijstItem(it) {
   if (it.onb) badgeHtml = '<span class="badge rood">onbekend</span>';
   else if (heeftVerschil(it)) badgeHtml = '<span class="badge rood">' + esc(it.g) + ' i.p.v. ' + systeemVoorraad(it) + '</span>';
   else if (it.g != null) badgeHtml = '<span class="badge groen">✓ ' + esc(it.g) + '</span>';
-  if (it.bsd) badgeHtml += ' <span class="badge groen">🛒 besteld' + (it.best > 0 ? ' ' + esc(it.best) : '') + '</span>';
+  if (it.bsd) badgeHtml += ' <span class="badge groen">🛒 besteld' + (it.best > 0 ? ' ' + esc(it.best) : '') + ' · ' + esc(fmtDatum.format(it.bsd)) + '</span>';
   else if (it.best != null && it.best > 0) badgeHtml += ' <span class="badge geel">bestel ' + esc(it.best) + '</span>';
   if (uitloopVanArtikel(artikelVanRegistratie(it))) badgeHtml = '<span class="badge rood">📉 uitloop</span> ' + badgeHtml;
   const el = document.createElement('div');
@@ -1398,16 +1420,23 @@ function renderOverzicht() {
       const c = credVan(it) || 'Onbekende crediteur';
       (groepen[c] = groepen[c] || []).push(it);
     }
-    let h = '';
+    const besteld = bestellen.filter(it => it.bsd);
+    // bovenaan: alle bestelde regels in één keer opschonen (alleen als er iets besteld is)
+    let h = besteld.length
+      ? '<div class="opschoon-rij"><button type="button" class="btn stil klein" id="btnSchoonBesteld">🧹 Bestelde regels opschonen · ' + besteld.length + '</button></div>'
+      : '';
     for (const cred of Object.keys(groepen).sort()) {
       const regels = groepen[cred];
       const nogTeDoen = regels.filter(it => !it.bsd);
+      const gedaan = regels.length - nogTeDoen.length;
       const dicht = ovDicht.has(cred);
       h += '<div class="cred-blok"><div class="cred-kop" data-cred="' + esc(cred) + '">' +
         '<span class="klap">' + (dicht ? '▸' : '▾') + '</span>' +
         '<span class="naam">' + esc(cred) + '</span>' +
         (nogTeDoen.length ? '' : '<span class="badge groen">✓ Alles besteld</span>') +
-        '<span class="cred-sub">' + regels.length + ' artikel' + (regels.length > 1 ? 'en' : '') + '</span></div>';
+        '<span class="cred-sub">' + regels.length + ' artikel' + (regels.length > 1 ? 'en' : '') + '</span>' +
+        (gedaan ? '<button type="button" class="cred-schoon" data-cred="' + esc(cred) + '" title="Bestelde regels van deze leverancier opschonen">🧹 ' + gedaan + '</button>' : '') +
+        '</div>';
       if (!dicht) {
         h += '<div class="tabel-wrap"><table class="bestel-tabel"><tr><th>Artikel</th><th>Hun nummer</th><th>Locatie</th><th class="num">Aantal</th><th>Besteld</th></tr>';
         for (const it of regels) {
@@ -1416,7 +1445,8 @@ function renderOverzicht() {
             (hun ? '<td class="hun-kopie" data-kopieer="' + esc(hun) + '">' + esc(hun) + '</td>' : '<td>–</td>') + '<td>' + locHtml(it.l) + '</td>' +
             '<td class="num"><input type="text" class="ov-aantal" data-key="' + esc(it.key) + '" inputmode="numeric" maxlength="4" value="' + esc(it.best) + '"></td>' +
             '<td class="besteld-cel"><input type="checkbox" class="ov-besteld" data-key="' + esc(it.key) + '"' + (it.bsd ? ' checked' : '') + '>' +
-            '<input type="text" class="ov-ink" data-key="' + esc(it.key) + '" inputmode="numeric" maxlength="8" value="' + esc(it.ink || '') + '"></td></tr>';
+            '<input type="text" class="ov-ink" data-key="' + esc(it.key) + '" inputmode="numeric" maxlength="8" value="' + esc(it.ink || '') + '">' +
+            (it.bsd ? '<div class="besteld-datum">besteld ' + esc(fmtDatum.format(it.bsd)) + '</div>' : '') + '</td></tr>';
         }
         h += '</table></div>';
       }
@@ -1433,6 +1463,22 @@ function renderOverzicht() {
       };
     });
     koppelOverzichtRijen($('ovBestellen'));
+    // bestelde regels opschonen: alles (knop bovenaan) of één leverancier (knop in de kop)
+    const schoonMetVraag = (keys, wie) => {
+      const n = keys.length + ' bestelde regel' + (keys.length > 1 ? 's' : '');
+      if (!confirm(n + ' van ' + wie + ' uit de bestellijst halen?\n\nGeteld en opmerkingen blijven staan; regels zonder telling of opmerking verdwijnen uit de controle (op alle apparaten).')) return;
+      schoonBesteld(keys);
+      toast('🧹 ' + n + ' opgeschoond');
+    };
+    const btnSchoon = $('btnSchoonBesteld');
+    if (btnSchoon) btnSchoon.onclick = () => schoonMetVraag(besteld.map(it => it.key), 'alle leveranciers');
+    $('ovBestellen').querySelectorAll('.cred-schoon').forEach(btn => {
+      btn.onclick = (e) => {
+        e.stopPropagation();
+        const cred = btn.getAttribute('data-cred');
+        schoonMetVraag(groepen[cred].filter(it => it.bsd).map(it => it.key), cred);
+      };
+    });
     // tik op artikelnummer of Hun nummer kopieert die waarde, zonder de rij te openen
     $('ovBestellen').querySelectorAll('[data-kopieer]').forEach(el => {
       el.onclick = (e) => {
@@ -1532,7 +1578,7 @@ function downloadScanlijst() {
     regels.push(csvRegel([it.b, it.a, it.o, it.f, it.h, it.l,
       it.l && !locNotatieOk(it.l) ? 'afwijkend' : '', it.v,
       it.g != null ? it.g : '', credVan(it), it.best != null ? it.best : '',
-      it.bsd ? 'ja' : '', it.ink || '', uitloopVanArtikel(artikelVanRegistratie(it)) ? 'ja' : '', it.opm]));
+      it.bsd ? datumIso(it.bsd) : '', it.ink || '', uitloopVanArtikel(artikelVanRegistratie(it)) ? 'ja' : '', it.opm]));
   }
   downloadCsv('Scanlijst ' + new Date().toISOString().slice(0, 10) + '.csv', regels);
 }
@@ -2073,7 +2119,7 @@ function downloadRondjeCsv(vol) {
     for (const s of vol.scans) {
       regels.push(csvRegel([fmtTijd.format(s.ts), s.b, s.a, s.o, s.l,
         s.l && !locNotatieOk(s.l) ? 'afwijkend' : '',
-        s.g != null ? s.g : '', s.best != null ? s.best : '', s.bsd ? 'ja' : '', s.opm || '']));
+        s.g != null ? s.g : '', s.best != null ? s.best : '', s.bsd ? datumIso(s.bsd) : '', s.opm || '']));
     }
   }
   downloadCsv('Rondje ' + new Date(vol.afgerond).toISOString().slice(0, 10) + '.csv', regels);

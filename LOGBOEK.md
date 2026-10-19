@@ -3,6 +3,83 @@
 Nieuwste sessie bovenaan. Oudere geschiedenis staat in git (`git log --oneline`) en in de vault
 (`NoteFlow\projecten\MagazijnScanner\Verleden.md`).
 
+## 2026-10-19 — v1.15.0: bestellijst opschonen en besteldatum
+
+**Aanleiding.** Timo: "controleer NoteFlow voor plannen, ideeën en bugs", daarna "ik wil dat je 1
+oppakt" = het vault-idee "Bestel lijst opschonen". Gebouwd door Fable (klein genoeg, ruim onder de
+bouwgrens).
+
+**Keuze van Timo.** Opschonen haalt alleen de *bestelde* regels (vinkje Besteld) uit de bestellijst.
+Eén knop bovenaan voor alle leveranciers en in elke leverancierskop een knop voor alleen die leverancier.
+
+**Gedaan.**
+- `app.js`: `schoonBesteld(keys)` (sectie besteld-markering): wist `best`, `bsd` en `ink`, houdt `g`,
+  `opm` en `kl`; blijft er niets over, dan een grafsteen via `verwijderRegistraties`. In
+  `renderOverzicht` de knop `#btnSchoonBesteld` bovenaan (alleen zichtbaar als er iets besteld is) en
+  per crediteurblok `.cred-schoon` met het aantal bestelde regels (stopPropagation, zodat de kop niet
+  inklapt). Beide met een confirm.
+- Besteldatum: `bsd` was al een tijdstempel, alleen de weergave ontbrak. Nu via `fmtDatum` onder het
+  vinkje in de besteltabel (`.besteld-datum`), in de badge in Gescand, in de kop van het artikelscherm
+  en in de knop "Besteld ✓". In de CSV (scanlijst en rondje) staat in de kolom Besteld nu de datum
+  `jjjj-mm-dd` (`datumIso`) in plaats van `ja`.
+- `style.css`: `.opschoon-rij`, `.cred-kop .cred-schoon`, `td.besteld-cel .besteld-datum`.
+- Versie 1.15.0 in `app.js` en `sw.js`.
+- Test `t_bestel_opschonen` in `tests/tests.py` (15 checks: knoppen afwezig zonder bestelde regels,
+  datum op vier plekken en in de CSV, per leverancier, grafsteen voor een lege regel, geteld blijft,
+  andere leverancier ongemoeid, blok klapt niet in, knop bovenaan, sync). Testreeks: **144/144**.
+- Documentatie: README, INSTRUCTIES.md, ASK-kennis (`ASK\kennis\magazijnscanner.md`, kopje
+  "Het overzicht op de pc").
+- Tijdens het werk: `tests/tests.py` stond in de werkmap op CRLF (vóór `.gitattributes`); nu op LF.
+
+**Status.** v1.15.0 in de werkmap, getest, **niet gecommit**. Live staat v1.14.0.
+
+**Open punten.**
+- Committen en pushen op Timo's teken (`v1.15.0: bestellijst opschonen en besteldatum`), samen met
+  het logboek van 9 oktober en het ASK-kopje in `CLAUDE.md`.
+- Na de uitrol op de pc bekijken: knop bovenaan, bezemknop in de kop, datum onder het vinkje.
+- Nog open uit de vault: v1.14.0 nalopen op de telefoon, vastgelopen Pages-run afbreken, `git stash drop`.
+
+## 2026-10-09 — v1.14.0 gecommit en uitgerold
+
+**Aanleiding.** Timo: "oke, commit en push maar". Uitgevoerd door Opus 5.5.
+
+**Gedaan.**
+- Nieuwe bestanden vooraf nagelopen op tokens en bedrijfsdata: niets gevonden. De testdata in
+  `tests/testdata.py` is verzonnen. `.claude/settings.json` (leeg) bewust niet meegenomen.
+- Twee commits zoals gepland, maar zonder de werkmap te overschrijven: de auto-modus blokkeerde
+  `git checkout stash@{0} -- app.js`. De A–D-versie van `app.js` ging daarom rechtstreeks uit de stash
+  in de index (`git update-index --cacheinfo`); de werkmap bleef op de stand na E1.
+  - `98f4db5 v1.14.0: opschoonronde A-D volgens de codereview`: alles, met de A–D-`app.js`. Getest op
+    een export van precies die stand (`git checkout-index` naar een tijdelijke map): 129/129.
+  - `09880de v1.14.0: app.js herordend, alleen verplaatsingen (E1)`: testreeks 129/129.
+- Gepusht naar `main`. Pages-run 37903834977 geslaagd; live `sw.js` en `app.js` melden 1.14.0.
+- Gecontroleerd dat `stash@{0}` identiek is aan `98f4db5`. `git stash drop` werd door de auto-modus
+  geblokkeerd; de stash staat er nog en is overbodig.
+
+**Ontdekt.** De uitrol van 6 augustus is nooit gelukt. De Pages-runs van v1.13.4 (`6509714`) en
+v1.13.5 (`02f526e`) faalden, en de run van de lege herstartcommit `93a1009` staat sinds 6 augustus als
+"queued" vast. Live stond daardoor tot vandaag v1.13.3, niet v1.13.5. Die vastgelopen run bestaat nog
+steeds; afbreken kan alleen ingelogd (Actions-tabblad, of `gh` na `gh auth login`). `gh` is op deze pc
+niet ingelogd; de status van een uitrol is ook zonder login te zien via
+`https://api.github.com/repos/VanSchieBV/magazijn-scanner/actions/runs?per_page=3`.
+
+**Gemeld na de uitrol.** Timo zag een tokenfout. Die bleek op zijn privételefoon te staan, die nog
+geen geldig token heeft; de werktelefoon heeft het juiste token. Geen fout in de app: "Geen token"
+betekent dat er niets is ingevoerd, "Token?" dat GitHub het token weigert (401/403). Dat gedrag was in
+v1.13.3 al hetzelfde.
+
+**Status.** v1.14.0 live en in git. Werkmap schoon op `.claude/` na.
+
+**Open punten.**
+- Telefoon en pc één keer openen voordat er een controle wordt afgerond (zie hieronder, "Bij de uitrol").
+- Op de telefoon nalopen: camera-scan, handscanner, een dubbele barcode, afronden met twee apparaten
+  (controlelijst G in het rapport). Ook de wijzigingen van v1.13.4 en v1.13.5 komen nu pas op de
+  apparaten (geen inzoomen bij terugkeer naar het scanscherm, Uitloop-tegel bovenin het Overzicht).
+- `git stash drop` (de momentopname is overbodig).
+- De vastgelopen Pages-run van `93a1009` afbreken op GitHub.
+- Vault-idee "Bestel lijst opschonen" en vault-plan "Nieuwe artikelbron: dagelijkse CSV-export op de
+  share" staan nog open.
+
 ## 2026-10-08 (middag) — Opschoonronde uitgevoerd: v1.14.0, niet gecommit
 
 **Aanleiding.** Timo: "voer de opschoonronde uit, sectie A tot en met E, zonder te committen"

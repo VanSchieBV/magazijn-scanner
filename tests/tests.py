@@ -35,7 +35,7 @@ PATCH_CSV = "window.__csv = []; downloadCsv = (naam, regels) => window.__csv.pus
 def t_laden(b):
     tel, = vers(b, 412); tel.start()
     check('laden: geen JS-fouten', tel.fouten() == [], tel.fouten())
-    check('laden: versie 1.14.0 in Instellingen', '1.14.0' in tel.ev("$('versieInfo').textContent"))
+    check('laden: versie 1.15.0 in Instellingen', '1.15.0' in tel.ev("$('versieInfo').textContent"))
     check('D7: ZXing niet geladen bij de start', tel.ev("typeof ZXing") == 'undefined')
     check('D2: status groen na start', tel.ev("$('statusDot').className") == 'status-dot ok', tel.ev("$('statusTxt').textContent"))
     pc = b.apparaat(1280); pc.start()
@@ -363,6 +363,39 @@ def t_uitloop_bestel(b):
     check('kiezer: tweede artikel opent', 'Ring 10 mm' in tel.ev("$('artKop').textContent") and not tel.ev("$('kiesOverlay').classList.contains('open')"))
     check('geen JS-fouten', tel.fouten() == [], tel.fouten())
 
+def t_bestel_opschonen(b):
+    pc, = vers(b, 1280); pc.start()
+    reg(pc, '222', bestel=4); reg(pc, '111', bestel=2, geteld=7); reg(pc, '444', bestel=1, opm='kapot')
+    pc.ev("toonView('overzicht')")
+    check('opschonen: geen knoppen zolang niets besteld is', pc.ev("!$('btnSchoonBesteld')") and pc.ev("$('ovBestellen').querySelectorAll('.cred-schoon').length") == 0)
+    for k in ('222', '111', '444'):
+        pc.ev(f"const cb = $('ovBestellen').querySelector('.ov-besteld[data-key=\"{k}\"]'); cb.checked = true; cb.dispatchEvent(new Event('change'))")
+    datum = pc.ev("fmtDatum.format(telling.items['222'].bsd)")
+    check('besteld: datum in de besteltabel', datum in pc.ev("$('ovBestellen').querySelector('tr[data-key=\"222\"] .besteld-datum').textContent"))
+    check('besteld: datum in het Gescand-tabblad', pc.ev("toonView('lijst'); $('lijstItems').textContent").count(datum) == 3)
+    pc.ev("toonView('scan'); zoekEnOpen('222')")
+    check('besteld: datum op het artikelscherm', datum in pc.ev("$('btnBesteld').textContent") and datum in pc.ev("$('artKop').textContent"))
+    pc.ev("sluitPaneel(); " + PATCH_CSV + " downloadScanlijst()")
+    csv = pc.ev("window.__csv[0].regels")
+    iso = pc.ev("datumIso(telling.items['222'].bsd)")
+    check('besteld: datum in de CSV', csv[0].split(';')[11] == 'Besteld' and all(r.split(';')[11] == iso for r in csv[1:]), csv)
+    pc.ev("toonView('overzicht')")
+    knop = pc.ev("$('ovBestellen').querySelector('.cred-schoon[data-cred=\"Leverancier A\"]').textContent")
+    check('opschonen: knop per leverancier telt de bestelde regels', pc.ev("$('ovBestellen').querySelectorAll('.cred-schoon').length") == 2 and '2' in knop, knop)
+    pc.ev("$('ovBestellen').querySelector('.cred-schoon[data-cred=\"Leverancier A\"]').click()")
+    check('opschonen: lege regel wordt een grafsteen', pc.ev("telling.items['222'].del") is True)
+    check('opschonen: getelde regel houdt geteld, verliest bestellen', pc.ev("telling.items['111'].g") == 7 and pc.ev("telling.items['111'].best == null && !telling.items['111'].bsd && !telling.items['111'].ink"))
+    check('opschonen: andere leverancier ongemoeid', pc.ev("!!telling.items['444'].bsd"))
+    check('opschonen: knop klapt het blok niet in', not pc.ev("ovDicht.has('Leverancier A')"))
+    check('opschonen: 111 uit de bestellijst, nog wel in Gescand', 'O1001' not in pc.ev("$('ovBestellen').textContent") and 'O1001' in pc.ev("toonView('lijst'); $('lijstItems').textContent"))
+    pc.ev("toonView('overzicht'); $('btnSchoonBesteld').click()")
+    check('opschonen: knop bovenaan ruimt alle leveranciers op', pc.ev("telling.items['444'].opm") == 'kapot' and pc.ev("!telling.items['444'].bsd") and pc.ev("!$('btnSchoonBesteld')"))
+    check('opschonen: bestellijst leeg', 'Niets te bestellen' in pc.ev("$('ovBestellen').textContent"))
+    pc.ev("await syncTellingDirect()")
+    rem = remote('telling.json')['items']
+    check('opschonen: gesynct naar de cloud', rem['222'].get('del') is True and 'bsd' not in rem['111'] and rem['111']['g'] == 7, rem)
+    check('geen JS-fouten', pc.fouten() == [], pc.fouten())
+
 def t_instellingen(b):
     tel, = vers(b); tel.start()
     tel.ev("toonView('instellingen'); $('inpLocUitz').value = 'ZOLDER\\nWPK\\nOliehok\\n56.'; $('btnLocUitzOpslaan').click()")
@@ -446,7 +479,7 @@ def t_a8_d6(b):
     check('D6: volle cache geeft een duidelijke melding', ok is True and any('te groot voor de cache' in t for t in tel.ev('window.__toasts')), tel.ev('window.__toasts'))
     check('D6: artikellijst werkt dan wel', tel.ev("artikelen.length") == 6 and tel.ev("statusPerTaak.art.soort") == 'ok')
 
-TESTS = [t_laden, t_a1, t_a2, t_a2_review, t_a3, t_a4, t_a8_d6, t_a5, t_a6, t_a7_c1, t_a9_d2, t_a10, t_a11_d4, t_a12, t_b2, t_c3_c5, t_d5, t_rondje, t_uitloop_bestel, t_instellingen]
+TESTS = [t_laden, t_a1, t_a2, t_a2_review, t_a3, t_a4, t_a8_d6, t_a5, t_a6, t_a7_c1, t_a9_d2, t_a10, t_a11_d4, t_a12, t_b2, t_c3_c5, t_d5, t_rondje, t_uitloop_bestel, t_bestel_opschonen, t_instellingen]
 
 if __name__ == '__main__':
     filt = sys.argv[1] if len(sys.argv) > 1 else ''

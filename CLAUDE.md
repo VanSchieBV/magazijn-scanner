@@ -70,6 +70,13 @@ openen, ADB naar de telefoon, de geplande taak of Credential Manager aanraken.
   `telling.json`, `rondje.json` (route, actief rondje, historie, uitzonderingen, gebieden, uitloop),
   `archief/`.
 
+## Kennis voor ASK (Ask me Anything)
+
+Tijdens Timo's ouderschapsverlof moeten collega's zelf uitleg kunnen krijgen via de app ASK. Als Timo in
+deze sessie vragen beantwoordt of uitlegt hoe Magazijn Scanner gebruikt wordt, schrijf die kennis in
+`C:\Users\td\Projecten_AI\ASK\kennis\magazijnscanner.md` (kopjes aanhouden; regels in
+`C:\Users\td\Projecten_AI\ASK\kennis\LEESMIJ.md`). Ruwe antwoorden mogen; de ASK-sessie maakt het netjes.
+
 ## Vault (NoteFlow-projecten)
 
 Projectmap `SecondBrain\NoteFlow\projecten\MagazijnScanner\`. Na elk afgerond onderdeel:
