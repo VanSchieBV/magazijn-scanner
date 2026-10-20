@@ -632,8 +632,21 @@ input.ov-aantal, input.ov-ink, input.ov-vp {
 }
 input.ov-aantal { width: 3.4em; text-align: right; font-weight: 650; color: var(--yellow); }
 tr.rij-besteld input.ov-aantal { color: var(--green); }
-input.ov-ink { width: 6.5em; margin-left: 6px; font-size: 0.95rem; }
-input.ov-vp { width: 4.5em; margin-left: 6px; }
+/* verpakkingen (simpele weergave) staat op de plek van het inkoopnummer en ziet er hetzelfde uit */
+input.ov-ink, input.ov-vp { width: 6.5em; margin-left: 6px; font-size: 0.95rem; }
+/* ✕ vóór het artikelnummer in de besteltabel: de scan annuleren */
+.art-met-del { display: flex; align-items: flex-start; gap: 6px; }
+.art-met-del > div { min-width: 0; }
+button.ov-del {
+  flex: none;
+  background: none;
+  border: none;
+  color: var(--muted);
+  font: inherit;
+  padding: 0 2px;
+  cursor: pointer;
+}
+button.ov-del:hover { color: var(--red); }
 /* vaste kolombreedtes: elke crediteurtabel identiek, Besteld altijd uiterst rechts.
    Artikel en Hun nummer delen de resterende ruimte 50/50 (geen width = gelijke
    verdeling bij table-layout:fixed) — posities schuiven dus nooit mee met de inhoud. */
@@ -953,7 +966,6 @@ nav button .nbadge {
 .header-simpel .switch-lbl { font-size: 0.8rem; color: var(--muted); }
 /* verbergen in de simpele stand; elementen die de app met het hidden-attribuut
    stuurt (rondje-hint, filterregel, kaarten in het overzicht) regelt app.js */
-body.simpel .handscanner-row,
 body.simpel #ovStats,
 body.simpel #ovKnoppen,
 body.simpel #view-instellingen .card:not(#kaartSimpel) { display: none; }

@@ -5,7 +5,7 @@
 'use strict';
 
 // ---------- constanten ----------
-const VERSIE = '1.16.1';
+const VERSIE = '1.17.0';
 const DATA_REPO = 'VanSchieBV/magazijn-data';
 const API_BASE = 'https://api.github.com/repos/' + DATA_REPO + '/contents/';
 const SYNC_HERKANS_MS = 8000;                        // herkansing na een netwerk- of serverfout
@@ -1463,9 +1463,13 @@ function koppelOverzichtRijen(container) {
 
 // artikelcel in de overzichtstabellen: nummer vet met de omschrijving eronder;
 // kopieerbaar = tik op het nummer kopieert het (besteltabel)
-function artikelCel(nr, oms, kopieerbaar) {
-  return '<td><b' + (kopieerbaar ? ' class="art-kopie" data-kopieer="' + esc(nr) + '"' : '') + '>' + esc(nr) +
-    '</b><br><span class="muted">' + esc(oms) + '</span></td>';
+// delKey = sleutel van de registratie: dan staat er een ✕ vóór het nummer (besteltabel)
+function artikelCel(nr, oms, kopieerbaar, delKey) {
+  const inhoud = '<b' + (kopieerbaar ? ' class="art-kopie" data-kopieer="' + esc(nr) + '"' : '') + '>' + esc(nr) +
+    '</b><br><span class="muted">' + esc(oms) + '</span>';
+  if (!delKey) return '<td>' + inhoud + '</td>';
+  return '<td><div class="art-met-del"><button type="button" class="ov-del" data-key="' + esc(delKey) +
+    '" aria-label="Uit het overzicht verwijderen" title="Uit het overzicht verwijderen">✕</button><div>' + inhoud + '</div></div></td>';
 }
 
 function renderOverzicht() {
@@ -1559,12 +1563,12 @@ function renderOverzicht() {
         h += '<div class="tabel-wrap"><table class="bestel-tabel"><tr><th>Artikel</th><th>Hun nummer</th><th>Locatie</th><th class="num">Aantal</th><th>Besteld</th></tr>';
         for (const it of regels) {
           const hun = it.h || it.f || '';
-          h += '<tr data-key="' + esc(it.key) + '"' + (it.bsd ? ' class="rij-besteld"' : '') + '>' + artikelCel(it.a || it.b, it.o, true) +
+          h += '<tr data-key="' + esc(it.key) + '"' + (it.bsd ? ' class="rij-besteld"' : '') + '>' + artikelCel(it.a || it.b, it.o, true, it.key) +
             (hun ? '<td class="hun-kopie" data-kopieer="' + esc(hun) + '">' + esc(hun) + '</td>' : '<td>–</td>') + '<td>' + locHtml(it.l) + '</td>' +
             '<td class="num"><input type="text" class="ov-aantal" data-key="' + esc(it.key) + '" inputmode="numeric" maxlength="4" placeholder="–" value="' + esc(it.best) + '"></td>' +
             '<td class="besteld-cel"><input type="checkbox" class="ov-besteld" data-key="' + esc(it.key) + '"' + (it.bsd ? ' checked' : '') + '>' +
             (simpel
-              ? '<input type="text" class="ov-vp" data-key="' + esc(it.key) + '" inputmode="numeric" maxlength="4" placeholder="verp." value="' + esc(it.vp || '') + '">'
+              ? '<input type="text" class="ov-vp" data-key="' + esc(it.key) + '" inputmode="numeric" maxlength="4" value="' + esc(it.vp || '') + '">'
               : '<input type="text" class="ov-ink" data-key="' + esc(it.key) + '" inputmode="numeric" maxlength="8" value="' + esc(it.ink || '') + '">') +
             (it.bsd ? '<div class="besteld-datum">besteld ' + esc(fmtDatum.format(it.bsd)) +
               (!simpel && it.vp ? ' · ' + esc(it.vp) + ' verp.' : '') + '</div>' : '') + '</td></tr>';
@@ -1598,6 +1602,23 @@ function renderOverzicht() {
         e.stopPropagation();
         const cred = btn.getAttribute('data-cred');
         schoonMetVraag(groepen[cred].filter(it => it.bsd).map(it => it.key), cred);
+      };
+    });
+    // ✕ vóór het artikelnummer: de scan annuleren. De registratie verdwijnt (grafsteen) uit
+    // het overzicht en uit Gescand, op alle apparaten; eerst een waarschuwing
+    $('ovBestellen').querySelectorAll('.ov-del').forEach(btn => {
+      btn.onclick = (e) => {
+        e.stopPropagation();
+        const key = btn.getAttribute('data-key');
+        const it = levend(telling.items[key]);
+        if (!it) return;
+        const naam = it.a || it.b;
+        if (!confirm(naam + (it.o ? ' (' + it.o + ')' : '') + ' uit het overzicht verwijderen?\n\n' +
+          'De scan wordt geannuleerd: het artikel verdwijnt uit de bestellijst en uit Gescand, op alle apparaten. ' +
+          'Een telling of opmerking van dit artikel gaat ook weg.')) return;
+        verwijderRegistraties([key]);
+        renderAlles();
+        toast('🗑 ' + naam + ' uit het overzicht verwijderd');
       };
     });
     // tik op artikelnummer of Hun nummer kopieert die waarde, zonder de rij te openen

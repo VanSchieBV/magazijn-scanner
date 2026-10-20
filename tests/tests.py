@@ -35,7 +35,7 @@ PATCH_CSV = "window.__csv = []; downloadCsv = (naam, regels) => window.__csv.pus
 def t_laden(b):
     tel, = vers(b, 412); tel.start()
     check('laden: geen JS-fouten', tel.fouten() == [], tel.fouten())
-    check('laden: versie 1.16.1 in Instellingen', '1.16.1' in tel.ev("$('versieInfo').textContent"))
+    check('laden: versie 1.17.0 in Instellingen', '1.17.0' in tel.ev("$('versieInfo').textContent"))
     check('D7: ZXing niet geladen bij de start', tel.ev("typeof ZXing") == 'undefined')
     check('D2: status groen na start', tel.ev("$('statusDot').className") == 'status-dot ok', tel.ev("$('statusTxt').textContent"))
     pc = b.apparaat(1280); pc.start()
@@ -396,6 +396,38 @@ def t_bestel_opschonen(b):
     check('opschonen: gesynct naar de cloud', rem['222'].get('del') is True and 'bsd' not in rem['111'] and rem['111']['g'] == 7, rem)
     check('geen JS-fouten', pc.fouten() == [], pc.fouten())
 
+MAAT_RIJ = """(() => {
+  const r = $('ovBestellen').querySelector('tr[data-key="222"]'), x0 = r.getBoundingClientRect().left;
+  const veld = r.querySelector('.ov-ink, .ov-vp'), rect = el => el.getBoundingClientRect();
+  return [Math.round(rect(veld).left - x0), Math.round(rect(veld).width), getComputedStyle(veld).fontSize, veld.placeholder,
+          Math.round(rect(r.querySelector('.ov-del')).left - x0), Math.round(rect(r.querySelector('.art-kopie')).left - x0),
+          Math.round(rect(r.querySelector('.ov-aantal')).left - x0), Math.round(rect(r.querySelector('.ov-besteld')).left - x0)];
+})()"""
+
+def t_bestel_verwijderen(b):
+    pc, = vers(b, 1280); pc.start()
+    reg(pc, '222', bestel=4); reg(pc, '111', bestel=2, geteld=7, opm='test')
+    pc.ev("toonView('overzicht')")
+    check('verwijderen: ✕ vóór het artikelnummer in elke regel', pc.ev("[...$('ovBestellen').querySelectorAll('tr[data-key]')].every(r => { const d = r.querySelector('td:first-child .ov-del'), nr = r.querySelector('td:first-child .art-kopie'); return !!(d && nr && (d.compareDocumentPosition(nr) & 4)); })"))
+    pc.ev("window.__vraag = ''; window.confirm = (t) => { window.__vraag = t; return false; }; $('ovBestellen').querySelector('.ov-del[data-key=\"111\"]').click()")
+    vraag = pc.ev("window.__vraag")
+    check('verwijderen: eerst een waarschuwing', 'uit het overzicht verwijderen' in vraag and 'Gescand' in vraag, vraag)
+    check('verwijderen: nee in de waarschuwing laat alles staan', pc.ev("!telling.items['111'].del") and pc.ev("$('artPanel').hidden") is True)
+    pc.ev("window.confirm = () => true; window.__toasts = []; $('ovBestellen').querySelector('.ov-del[data-key=\"111\"]').click()")
+    check('verwijderen: registratie wordt een grafsteen, rij opent niet', pc.ev("telling.items['111'].del") is True and pc.ev("$('artPanel').hidden") is True)
+    check('verwijderen: weg uit het overzicht', 'O1001' not in pc.ev("$('ovBestellen').textContent") and 'O1001' not in pc.ev("$('ovVerschillen').textContent"))
+    check('verwijderen: weg uit Gescand, met melding', 'O1001' not in pc.ev("toonView('lijst'); $('lijstItems').textContent") and any('uit het overzicht verwijderd' in t for t in pc.ev("window.__toasts")))
+    pc.ev("await syncTellingDirect()")
+    check('verwijderen: gesynct naar de cloud', remote('telling.json')['items']['111'].get('del') is True)
+    pc.ev("toonView('overzicht')")
+    normaal = pc.ev(MAAT_RIJ)
+    pc.ev("zetSimpel(true); toonView('overzicht')")
+    simpel = pc.ev(MAAT_RIJ)
+    check('simpel: besteltabel ziet er hetzelfde uit als normaal (✕, aantal, vinkje, veld)', normaal == simpel and simpel[3] == '', [normaal, simpel])
+    pc.ev("$('ovBestellen').querySelector('.ov-del[data-key=\"222\"]').click()")
+    check('simpel: verwijderen werkt ook in de simpele weergave', pc.ev("telling.items['222'].del") is True and 'Niets te bestellen' in pc.ev("$('ovBestellen').textContent"))
+    check('verwijderen: geen JS-fouten', pc.fouten() == [], pc.fouten())
+
 NAV = "Object.fromEntries([...document.querySelectorAll('nav button[data-view]')].map(x => [x.dataset.view, !x.hidden]))"
 
 def t_simpel_pc(b):
@@ -481,7 +513,11 @@ def t_simpel_telefoon(b):
     tel.ev("toonView('instellingen')")
     zichtbaar = tel.ev("[...document.querySelectorAll('#view-instellingen .card')].filter(k => getComputedStyle(k).display !== 'none').map(k => k.id)")
     check('simpel telefoon: Instellingen toont alleen de schuif en de versie', tel.ev("$('swSimpel').checked") and zichtbaar == ['kaartSimpel'] and tel.ev("$('versieInfo').offsetParent !== null"), zichtbaar)
-    check('simpel telefoon: geen handscanner-schuif op het scanscherm', tel.ev("getComputedStyle(document.querySelector('.handscanner-row')).display") == 'none')
+    tel.ev("toonView('scan')")
+    check('simpel telefoon: handscanner-schuif op het scanscherm', tel.ev("getComputedStyle(document.querySelector('.handscanner-row')).display") != 'none' and tel.ev("$('swHandscanner').offsetParent !== null"))
+    tel.ev("$('swHandscanner').checked = true; $('swHandscanner').dispatchEvent(new Event('change'))")
+    check('simpel telefoon: handscanner aanzetten werkt', tel.ev("localStorage.getItem('mgz_handscanner')") == '1' and tel.ev("$('scanIdle').classList.contains('handscanner')"))
+    tel.ev("$('swHandscanner').checked = false; $('swHandscanner').dispatchEvent(new Event('change'))")
     tel.ev("toonView('scan'); rondje.route.rz = {loc: '21', label: '', ts: Date.now()}; rondjeStart(); updateRondjeUI()")
     check('simpel telefoon: geen rondje-seintje', tel.ev("$('rondjeHint').hidden") is True)
     tel.ev("zoekEnOpen('333')")
@@ -588,7 +624,7 @@ def t_a8_d6(b):
     check('D6: volle cache geeft een duidelijke melding', ok is True and any('te groot voor de cache' in t for t in tel.ev('window.__toasts')), tel.ev('window.__toasts'))
     check('D6: artikellijst werkt dan wel', tel.ev("artikelen.length") == 6 and tel.ev("statusPerTaak.art.soort") == 'ok')
 
-TESTS = [t_laden, t_a1, t_a2, t_a2_review, t_a3, t_a4, t_a8_d6, t_a5, t_a6, t_a7_c1, t_a9_d2, t_a10, t_a11_d4, t_a12, t_b2, t_c3_c5, t_d5, t_rondje, t_uitloop_bestel, t_bestel_opschonen, t_simpel_pc, t_simpel_telefoon, t_instellingen]
+TESTS = [t_laden, t_a1, t_a2, t_a2_review, t_a3, t_a4, t_a8_d6, t_a5, t_a6, t_a7_c1, t_a9_d2, t_a10, t_a11_d4, t_a12, t_b2, t_c3_c5, t_d5, t_rondje, t_uitloop_bestel, t_bestel_opschonen, t_bestel_verwijderen, t_simpel_pc, t_simpel_telefoon, t_instellingen]
 
 if __name__ == '__main__':
     filt = sys.argv[1] if len(sys.argv) > 1 else ''

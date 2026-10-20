@@ -75,6 +75,9 @@ Het token wordt alleen lokaal op het apparaat bewaard.
   lijst; de knop 🧹 in een leverancierskop doet dat alleen voor die leverancier. Geteld en
   opmerkingen blijven staan; een regel zonder telling of opmerking verdwijnt helemaal uit de
   controle. Niet-bestelde regels blijven altijd staan.
+  Per ongeluk of als test gescand? Het **✕** vóór het artikelnummer annuleert die scan: na een
+  waarschuwing verdwijnt het artikel uit het overzicht en uit Gescand, op alle apparaten (ook een
+  telling of opmerking van dat artikel gaat weg). Dat kruisje staat er ook in de simpele weergave.
 - **Controle afronden & leegmaken** (Instellingen) → archiveert de controle in de cloud en
   begint met een schone lijst, ook op de andere apparaten. Alleen doen als de hele ronde
   klaar is. Lukt de sync vlak ervoor niet (bijv. slechte wifi), dan breekt de app het
@@ -110,13 +113,16 @@ omzet; zet je hem uit, dan is de app weer precies zoals hij was.
 - **Pc:** zichtbaar zijn Scannen, Gescand en Overzicht. Het overzicht toont alleen de bestellijst
   per leverancier, met het aantal uit het magazijn en bovenaan een korte uitleg in stappen. Kopieer
   *Hun nummer* met het ⧉-icoontje, bestel in de webshop van de leverancier, vink **Besteld** aan en
-  vul in hoeveel **verpakkingen** je besteld hebt (een doos van 200 boutjes is 1). De knoppen 🧹 om
-  bestelde regels op te schonen blijven ook hier staan.
-- **Vooraf instellen (Timo):** de handscanner-stand zet je aan vóórdat je de simpele weergave
-  aanzet; het schuifje Handscanner is daarna verborgen, maar de stand blijft gelden. Het token dat
-  al op het apparaat staat blijft gewoon werken. Alleen als er ooit een ander token in moet (verlopen,
-  nieuw toestel): de kaart Koppeling is in de simpele weergave verborgen, zet de schuif dan even uit.
-  Een lopend rondje telt de scans gewoon mee.
+  vul in het veldje ernaast in hoeveel **verpakkingen** je besteld hebt (een doos van 200 boutjes is
+  1). De tabel ziet er hetzelfde uit als in de normale weergave; alleen betekent het veldje naast
+  Besteld hier verpakkingen in plaats van inkoopnummer. De knoppen 🧹 om bestelde regels op te schonen
+  en het ✕ om een scan te annuleren staan er ook.
+- **Handscanner:** het schuifje **Handscanner** staat ook in de simpele weergave op het
+  scanscherm (sinds v1.16.2), dus aan- en uitzetten kan altijd.
+- **Token:** het token dat al op het apparaat staat blijft gewoon werken. Alleen als er ooit een
+  ander token in moet (verlopen, nieuw toestel): de kaart Koppeling is in de simpele weergave
+  verborgen, zet de schuif dan even uit.
+- **Rondje:** een lopend rondje telt de scans in de simpele weergave gewoon mee.
 
 ## Wekelijks rondje
 

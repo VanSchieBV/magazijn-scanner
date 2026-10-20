@@ -3,6 +3,41 @@
 Nieuwste sessie bovenaan. Oudere geschiedenis staat in git (`git log --oneline`) en in de vault
 (`NoteFlow\projecten\MagazijnScanner\Verleden.md`).
 
+## 2026-10-20 — v1.17.0: handscanner-schuifje, gelijke besteltabel, ✕ om een scan te annuleren
+
+**Aanleiding.** Timo: (1) "Ik wil wel dat schuifje voor Handscanner in simpele modus." Gebouwd als
+v1.16.2 (199/199), niet apart uitgerold. (2) Met twee schermafdrukken van de besteltabel (simpel
+uit en aan): beide moeten eruitzien als de normale weergave, en links vóór het artikelnummer een
+kruisje om een artikel uit het overzicht te verwijderen ("als het ware wordt dan de scan
+geannuleerd"), met een waarschuwing; dan ook weg uit Gescand.
+
+**Gedaan.**
+- `style.css`: `.handscanner-row` uit de verbergregel voor `body.simpel` (schuifje Handscanner ook
+  in de simpele weergave). `input.ov-vp` krijgt dezelfde opmaak als `input.ov-ink` (6.5em,
+  0.95rem); nieuwe klassen `.art-met-del` en `button.ov-del` (grijs, rood bij hover).
+- `app.js`: `artikelCel` met vierde parameter `delKey` (alleen de besteltabel): ✕ vóór het nummer.
+  Klik = `confirm` ("… uit het overzicht verwijderen? De scan wordt geannuleerd …") en daarna
+  `verwijderRegistraties` (grafsteen, sync), toast; de rij opent niet (stopPropagation). In beide
+  weergaven. Het verpakkingenveld heeft geen placeholder "verp." meer. Versie 1.17.0.
+- `index.html`: uitlegstap 5 noemt "het veldje ernaast"; nieuwe stap 6 over het ✕.
+- Tests: `t_simpel_telefoon` (schuifje zichtbaar en werkt), nieuw `t_bestel_verwijderen` (✕ vóór
+  het nummer, waarschuwing, nee = niets weg, ja = grafsteen en weg uit overzicht en Gescand, sync,
+  besteltabel normaal en simpel op dezelfde posities met dezelfde veldopmaak, verwijderen in de
+  simpele weergave).
+- Documentatie: README, INSTRUCTIES.md, ASK-kennis (ook een vraag "per ongeluk gescand").
+
+**Eigen keuzes.** Het ✕ staat alleen in de besteltabel (daar ging het om), niet in de tabellen
+Telverschillen/Opmerkingen; daar kan het via het artikelscherm of Gescand. Verwijderen haalt de
+hele registratie weg (ook telling en opmerking), zoals "Uit controle verwijderen"; dat staat in de
+waarschuwing. Het rondje-rapport houdt een eerder gelogde scan (zoals bij elk verwijderen).
+
+**Testresultaten.** `node --check app.js` OK; volledige reeks **209/209**; na de laatste
+tekstwijziging in de uitleg nog eens `t_laden`, `t_simpel` en `t_bestel`: alles groen.
+Schermafdruk van de besteltabel in beide weergaven: tabel gelijk, ✕ vóór het nummer, geen
+JavaScript-fouten.
+
+**Status.** v1.17.0 in de werkmap, niet gecommit en niet gepusht (wacht op Timo).
+
 ## 2026-10-19 (avond, vervolg) — v1.16.1: aantal invullen op de scanner (simpele weergave)
 
 **Aanleiding.** Timo na de uitrol van v1.16.0: "Je moet wel de aantallen in kunnen vullen op de

@@ -15,7 +15,9 @@ PWA voor magazijncontrole met barcode/QR-scanner via de telefooncamera of een ha
 Scannen → artikelpaneel (geteld / bestellen / opmerking / besteld / uitloop) → opslaan. Tabblad
 **Gescand** toont de lopende controle, **Rondje** de wekelijkse controleroute, **Overzicht** (pc)
 telverschillen en bestellingen per crediteur (met besteldatum en knoppen om bestelde regels op te schonen,
-alles of per leverancier), **Instellingen** token, artikellijst en werkwijze.
+alles of per leverancier, en sinds v1.17.0 een ✕ vóór elk artikelnummer om een scan na een waarschuwing
+te annuleren: de registratie wordt een grafsteen en verdwijnt ook uit Gescand), **Instellingen** token,
+artikellijst en werkwijze.
 "Controle afronden" archiveert de controle in de cloud en maakt de lijst leeg, op alle apparaten.
 
 **Simpele weergave** (sinds v1.16.0, per apparaat): een schuif in de header (alleen op de pc, vanaf
@@ -25,8 +27,10 @@ locatie en voorraad het veld **Bestellen** (− en +), **Opslaan** en **Annulere
 Opslaan zet het artikel op de bestellijst en gaat terug naar de scanner: met een aantal als
 bestelaantal (`best`), zonder aantal als "bijna leeg" (veld `bl`).
 Op de pc: Scannen, Gescand en Overzicht, met alleen de bestellijst per leverancier (met de kolom
-Aantal), een uitleg in vijf stappen en naast het vinkje Besteld het aantal verpakkingen (veld `vp`). Sync, besteldatum, opschonen,
-het rondje (een scan telt mee) en de handscanner-stand lopen gewoon door. Uit = de app zoals hij was.
+Aantal), een uitleg in korte stappen en naast het vinkje Besteld het aantal verpakkingen (veld `vp`;
+zelfde opmaak als het inkoopnummer in de normale weergave). Sync, besteldatum, opschonen,
+het rondje (een scan telt mee) en de handscanner-stand lopen gewoon door; het schuifje Handscanner
+staat ook in de simpele weergave op het scanscherm (sinds v1.16.2). Uit = de app zoals hij was.
 
 ## Bouwen en testen
 
