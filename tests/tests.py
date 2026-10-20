@@ -35,7 +35,7 @@ PATCH_CSV = "window.__csv = []; downloadCsv = (naam, regels) => window.__csv.pus
 def t_laden(b):
     tel, = vers(b, 412); tel.start()
     check('laden: geen JS-fouten', tel.fouten() == [], tel.fouten())
-    check('laden: versie 1.18.0 in Instellingen', '1.18.0' in tel.ev("$('versieInfo').textContent"))
+    check('laden: versie 1.19.0 in Instellingen', '1.19.0' in tel.ev("$('versieInfo').textContent"))
     check('D7: ZXing niet geladen bij de start', tel.ev("typeof ZXing") == 'undefined')
     check('D2: status groen na start', tel.ev("$('statusDot').className") == 'status-dot ok', tel.ev("$('statusTxt').textContent"))
     pc = b.apparaat(1280); pc.start()
@@ -396,6 +396,42 @@ def t_bestel_opschonen(b):
     check('opschonen: gesynct naar de cloud', rem['222'].get('del') is True and 'bsd' not in rem['111'] and rem['111']['g'] == 7, rem)
     check('geen JS-fouten', pc.fouten() == [], pc.fouten())
 
+WACHT_SYNC = "while (syncBezig || rondjeSyncBezig) await new Promise(r => setTimeout(r, 100))"
+
+def t_auto_verversen(b):
+    tel, pc = vers(b, 412, 1280); tel.start(); pc.start()
+    pc.ev("await syncTellingDirect(); await syncRondje(); toonView('overzicht')")
+    reg(tel, '222', bestel=4); tel.ev("await syncTellingDirect()")
+    check('auto: zonder controle staat de scan nog niet op de pc', 'O1002' not in pc.ev("$('ovBestellen').textContent"))
+    pc.ev("window.__api = []; pollTick()")
+    check('auto: binnen 20 s na een sync nog geen nieuwe controle', pc.ev("window.__api") == [], pc.ev("window.__api"))
+    pc.ev("window.__api = []; window.__status = []; new MutationObserver(() => window.__status.push($('statusTxt').textContent))"
+          ".observe($('statusTxt'), {childList: true, characterData: true, subtree: true}); laatsteTellingSync = 0; pollTick(); " + WACHT_SYNC)
+    check('auto: pc haalt de nieuwe scan vanzelf binnen en toont hem', 'O1002' in pc.ev("$('ovBestellen').textContent"))
+    check('auto: alleen ophalen, niets terugschrijven', pc.ev("window.__api") == ['GET telling.json'], pc.ev("window.__api"))
+    check('auto: geen "Sync…" in het statusbolletje', 'Sync…' not in pc.ev("window.__status"), pc.ev("window.__status"))
+    pc.ev("window.__api = []; laatsteTellingSync = 0; laatsteRondjeSync = 0; pollTick(); " + WACHT_SYNC)
+    api = pc.ev("window.__api")
+    check('auto: zonder wijzigingen alleen ophalen (telling en rondje), geen commits', sorted(api) == ['GET rondje.json', 'GET telling.json'], api)
+    pc.ev("$('ovBestellen').querySelector('.ov-aantal[data-key=\"222\"]').focus()")
+    reg(tel, '111', bestel=2); tel.ev("await syncTellingDirect()")
+    pc.ev("laatsteTellingSync = 0; pollTick(); " + WACHT_SYNC)
+    check('auto: tijdens het invullen van een veld blijft de tabel staan', 'O1001' not in pc.ev("$('ovBestellen').textContent") and pc.ev("!!telling.items['111']"))
+    pc.ev("document.activeElement.blur()")
+    check('auto: na het verlaten van het veld staat de nieuwe regel er', 'O1001' in pc.ev("$('ovBestellen').textContent"))
+    pc.ev("Object.defineProperty(document, 'visibilityState', {value: 'hidden', configurable: true}); window.__api = []; laatsteTellingSync = 0; pollTick()")
+    check('auto: geen controle als de app niet zichtbaar is', pc.ev("window.__api") == [])
+    pc.ev("delete document.visibilityState")
+    check('auto: geen JS-fouten', pc.fouten() == [] and tel.fouten() == [], [pc.fouten(), tel.fouten()])
+    pc.ev("window.__merk = 1; updateWacht = true; $('ovBestellen').querySelector('.ov-aantal[data-key=\"222\"]').focus(); laatsteTellingSync = Date.now(); pollTick()")
+    check('auto: nieuwe versie wacht zolang er een veld met inhoud open staat', pc.ev("window.__merk") == 1)
+    try:
+        pc.ev("document.activeElement.blur(); pollTick()")
+    except Exception:
+        pass   # de pagina herlaadt
+    time.sleep(2.5)
+    check('auto: daarna herlaadt de app vanzelf', pc.ev("typeof window.__merk") == 'undefined' and '1.19.0' in pc.ev("$('versieInfo').textContent"))
+
 def t_nieuw_item(b):
     tel, pc = vers(b, 412, 1280); tel.start(extra={'mgz_simpel': '1'}); pc.start()
     reg(pc, '222', bestel=4)
@@ -680,7 +716,7 @@ def t_a8_d6(b):
     check('D6: volle cache geeft een duidelijke melding', ok is True and any('te groot voor de cache' in t for t in tel.ev('window.__toasts')), tel.ev('window.__toasts'))
     check('D6: artikellijst werkt dan wel', tel.ev("artikelen.length") == 6 and tel.ev("statusPerTaak.art.soort") == 'ok')
 
-TESTS = [t_laden, t_a1, t_a2, t_a2_review, t_a3, t_a4, t_a8_d6, t_a5, t_a6, t_a7_c1, t_a9_d2, t_a10, t_a11_d4, t_a12, t_b2, t_c3_c5, t_d5, t_rondje, t_uitloop_bestel, t_bestel_opschonen, t_bestel_verwijderen, t_nieuw_item, t_simpel_pc, t_simpel_telefoon, t_instellingen]
+TESTS = [t_laden, t_a1, t_a2, t_a2_review, t_a3, t_a4, t_a8_d6, t_a5, t_a6, t_a7_c1, t_a9_d2, t_a10, t_a11_d4, t_a12, t_b2, t_c3_c5, t_d5, t_rondje, t_uitloop_bestel, t_bestel_opschonen, t_bestel_verwijderen, t_nieuw_item, t_auto_verversen, t_simpel_pc, t_simpel_telefoon, t_instellingen]
 
 if __name__ == '__main__':
     filt = sys.argv[1] if len(sys.argv) > 1 else ''

@@ -108,6 +108,15 @@ Samenvoegen: per sleutel wint de nieuwste `ts` (`mergeOpTs`). Verwijderen gaat v
 `telling.json` en `rondje.json` gaat met inhoud én sha uit één verzoek; schreef een ander apparaat
 tussendoor, dan weigert GitHub (409) en probeert de app het na 1,5 s opnieuw (na een netwerkfout 8 s).
 
+**Achtergrondcontrole** (sinds v1.19.0, `pollTick` elke 5 s): zolang de app zichtbaar is en er internet
+en een token is, haalt hij `telling.json` elke 20 s en `rondje.json` elke minuut op (stil: geen "Sync…"
+in het statusbolletje, scherm alleen opnieuw opgebouwd als er iets veranderd is, terugschrijven alleen
+als dit apparaat iets nieuws had), en zoekt hij elke 5 minuten naar een nieuwe app-versie. Een nieuwe
+versie wordt toegepast zodra er geen artikel, camera of sheet open is en er geen ingevuld veld de
+focus heeft (`rustigVoorHerladen`). Een veld waarin getypt wordt, houdt het opnieuw opbouwen tegen tot
+het verlaten wordt (`renderAlles`). Kosten: ongeveer 240 GET-verzoeken per uur per zichtbaar apparaat
+(GitHub staat er 5000 per uur per account toe).
+
 Rondje (`rondje.json`): `route{id:{loc,label,gebied,ts,del}}`, `actief{gestart,checks{id:{ts,w,n,opm}},scans{sleutel:{…}}}`
 met `w` = scan | hand | skip | reset, `historie[]` (samenvattingen), `archiefWacht[]` (rapporten die nog
 naar `archief/rondje-<id>.json` moeten), `locUitz{ts,lijst}`, `gebieden{ts,lijst}`,

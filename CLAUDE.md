@@ -59,6 +59,10 @@ openen, ADB naar de telefoon, de geplande taak of Credential Manager aanraken.
 - `telling.json` draagt `afgerond` (ms); lokale registraties van vóór dat moment vervallen bij de sync.
   Afronden breekt af als de sync ervoor mislukt. Syncbestanden lezen met inhoud én sha uit één
   verzoek (`ghGetMetSha`); herkansing 1,5 s na een conflict, 8 s na een netwerkfout.
+- Achtergrondcontrole (`pollTick`, sinds v1.19.0): alleen zichtbaar en online; telling elke 20 s, rondje
+  elke minuut, app-update elke 5 min. Een controle zonder wijzigingen mag nooit schrijven (elke PUT is
+  een commit in de data-repo); de test `t_auto_verversen` bewaakt dat. Herladen voor een nieuwe versie
+  alleen via `rustigVoorHerladen()`.
 - Statusbolletje via `zetStatus(taak, soort, tekst)` met taak `'art'` of `'telling'`: bezig wint,
   daarna een fout, anders de laatste melding.
 - Locaties tolerant matchen (`locSegmenten` splitst op `.` én `-`), maar afwijkende notaties met ⚠

@@ -76,6 +76,10 @@ Het token wordt alleen lokaal op het apparaat bewaard.
   vanzelf, zonder dat het toetsenbord omhoog komt. Het schuifje blijft op dat
   toestel aan staan.
 - **Gescand** → lijst van wat in deze controle al geregistreerd is.
+- **Vanzelf bijgewerkt** → zolang de app open en zichtbaar is, haalt hij wijzigingen van andere
+  apparaten vanzelf binnen (registraties elke 20 seconden, het rondje elke minuut); de pagina
+  verversen is niet nodig. Een nieuwe versie van de app wordt elke paar minuten gezocht en vanzelf
+  geladen zodra je niet midden in iets zit.
 - **Overzicht** (PC) → telverschillen en bestellingen per crediteur. Zet je een regel op
   **Besteld**, dan staat de besteldatum eronder (ook in Gescand en op het artikelscherm).
   **🧹 Bestelde regels opschonen** (bovenaan de bestellijst) haalt alle bestelde regels uit de

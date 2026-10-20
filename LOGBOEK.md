@@ -3,6 +3,40 @@
 Nieuwste sessie bovenaan. Oudere geschiedenis staat in git (`git log --oneline`) en in de vault
 (`NoteFlow\projecten\MagazijnScanner\Verleden.md`).
 
+## 2026-10-20 (vervolg 2) — v1.19.0: de app werkt zichzelf bij
+
+**Aanleiding.** Timo: "Ik wil dat de webpagina zichzelf ververst. Nu moet ik bij elke wijziging de
+site verversen." Wijzigingen (een nieuwe scan of iets anders) moeten vanzelf zichtbaar worden.
+
+**Oorzaak.** De app synchroniseerde alleen na een eigen wijziging, bij het openen/zichtbaar worden, na
+het terugkomen van internet en via de knop Sync; er was geen regelmatige controle.
+
+**Gedaan.**
+- `app.js`: achtergrondcontrole `pollTick` (elke 5 s, alleen zichtbaar, online en met token):
+  `syncTelling({stil: true})` als de vorige telling-sync 20 s geleden is, `syncRondje({stil: true})`
+  na 60 s, `swReg.update()` na 5 min. Een sync die loopt of gepland staat gaat voor. Stil = geen
+  "Sync…" in het statusbolletje en alleen opnieuw opbouwen als de gegevens veranderd zijn (vergelijking
+  van de JSON voor en na). `syncRondje` bouwt nu ook Gescand/Overzicht opnieuw op als het rondje
+  veranderde (uitlooplijst, uitzonderingen). Nieuwe versie: `rustigVoorHerladen()` (geen artikel,
+  camera of sheet open en geen ingevuld veld met focus); anders wacht `updateWacht` en herlaadt de
+  achtergrondcontrole zodra het kan. Versie 1.19.0.
+- Test `t_auto_verversen` (12 checks): scan van een ander apparaat verschijnt na een controle, alleen
+  een GET, geen "Sync…", zonder wijzigingen geen PUT (telling en rondje), niet binnen 20 s na een sync,
+  tabel blijft staan zolang een veld de focus heeft, geen controle als de app verborgen is, nieuwe
+  versie wacht op een ingevuld veld en herlaadt daarna vanzelf.
+- Documentatie: README (achtergrondcontrole), INSTRUCTIES.md, ASK-kennis (twee antwoorden
+  bijgewerkt), `CLAUDE.md` (ontwerpregel: een controle zonder wijzigingen schrijft nooit).
+
+**Eigen keuzes.** Geen volledige herlaadbeurt van de pagina bij elke wijziging, maar alleen de gegevens
+en het scherm bijwerken: zo blijven invoer, scrollpositie en ingeklapte blokken staan. 20 seconden als
+afweging tussen snelheid en het aantal GitHub-verzoeken (ongeveer 240 per uur per zichtbaar apparaat,
+limiet 5000 per uur per account).
+
+**Testresultaten.** `node --check app.js` OK; `t_auto_verversen` 12/12; volledige reeks **244/244**
+(de achtergrondcontrole verstoort de andere tests niet).
+
+**Status.** v1.19.0 in de werkmap, niet gecommit en niet gepusht (wacht op Timo).
+
 ## 2026-10-20 (vervolg) — v1.18.0: nieuwe items zonder code
 
 **Aanleiding.** Timo: items zonder QR-code of nummer moeten ook genoteerd en besteld kunnen worden.
@@ -43,7 +77,11 @@ groen. Schermafdrukken: scanscherm met de balk Nieuw item, artikelscherm van een
 Nieuwe items op de pc, item bij een leverancier met blauwe balk, simpele weergave; geen horizontale
 scrollbalk, geen JavaScript-fouten.
 
-**Status.** v1.18.0 in de werkmap, niet gecommit en niet gepusht (wacht op Timo).
+**Uitrol.** Timo: "ja" (online zetten). Gecommit als `9ab653f` en gepusht; Pages-run en live versie
+gecontroleerd (vault-log "v1.18.0 gepusht en live"). Deze regel zelf is nog niet gecommit.
+
+**Status.** v1.18.0 live en in git. Nakijken door Fable (v1.16.0 t/m v1.18.0) en nalopen op de pc en
+de scanner staan nog open; zie de open punten bij v1.17.0.
 
 ## 2026-10-20 — v1.17.0: handscanner-schuifje, gelijke besteltabel, ✕ om een scan te annuleren
 

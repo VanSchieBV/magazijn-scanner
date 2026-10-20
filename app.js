@@ -5,11 +5,17 @@
 'use strict';
 
 // ---------- constanten ----------
-const VERSIE = '1.18.0';
+const VERSIE = '1.19.0';
 const DATA_REPO = 'VanSchieBV/magazijn-data';
 const API_BASE = 'https://api.github.com/repos/' + DATA_REPO + '/contents/';
 const SYNC_HERKANS_MS = 8000;                        // herkansing na een netwerk- of serverfout
 const SYNC_CONFLICT_MS = 1500;                       // herkansing na een conflict (ander apparaat schreef net)
+// achtergrondcontrole (alleen zichtbaar en online): wijzigingen van andere apparaten
+// vanzelf binnenhalen en een nieuwe app-versie vanzelf toepassen
+const POLL_TICK_MS = 5000;                           // zo vaak kijken of er iets te doen is
+const POLL_TELLING_MS = 20000;                       // telling.json ophalen (alleen GET als er niets veranderd is)
+const POLL_RONDJE_MS = 60000;                        // rondje.json ophalen
+const UPDATE_CHECK_MS = 5 * 60 * 1000;               // nieuwe app-versie zoeken
 const GRAFSTEEN_BEWAAR_MS = 30 * 24 * 3600 * 1000;   // grafstenen 30 dagen bewaren
 const TRIGGER_VENSTER = 2500; // ms zoeken na een druk op de scanknop
 const NIEUW_PREFIX = 'nieuw-';                       // sleutel van een nieuw item (zonder code)
@@ -39,6 +45,9 @@ let syncTimer = null;
 let syncBezig = false;
 let syncNodig = false;
 let tellingSha = null;         // sha van telling.json na de laatste geslaagde sync
+let laatsteTellingSync = Date.now();   // begin van de laatste telling-sync (achtergrondcontrole)
+let laatsteRondjeSync = Date.now();    // begin van de laatste rondje-sync
+let laatsteUpdateCheck = Date.now();   // laatste keer dat er naar een nieuwe app-versie is gezocht
 let statusPerTaak = {};        // 'art' | 'telling' -> {soort, tekst}
 
 // wekelijks rondje (opbouw: zie de sectie "wekelijks rondje")
@@ -273,14 +282,19 @@ function planSync() {
   syncTimer = setTimeout(syncTelling, 1500);
 }
 
-// geeft true terug als ophalen, samenvoegen en terugschrijven gelukt zijn
-async function syncTelling() {
+// geeft true terug als ophalen, samenvoegen en terugschrijven gelukt zijn.
+// opties.stil (achtergrondcontrole): geen "Sync…" in het statusbolletje en het scherm
+// alleen opnieuw opbouwen als er iets veranderd is
+async function syncTelling(opties) {
+  const stil = !!(opties && opties.stil);
   if (!getToken()) { zetStatus('telling', 'err', 'Geen token'); return false; }
   if (!navigator.onLine) { zetStatus('telling', 'err', 'Offline'); return false; }
   if (syncBezig) { planSync(); return false; }
   syncBezig = true;
   syncNodig = false;
-  zetStatus('telling', 'busy', 'Sync…');
+  laatsteTellingSync = Date.now();
+  if (!stil) zetStatus('telling', 'busy', 'Sync…');
+  const voor = stil ? JSON.stringify(telling.items) : null;
   let gelukt = false;
   let herkansMs = SYNC_HERKANS_MS;
   try {
@@ -332,7 +346,7 @@ async function syncTelling() {
     syncNodig = true;
   } finally {
     syncBezig = false;
-    renderAlles();
+    if (!stil || JSON.stringify(telling.items) !== voor) renderAlles();
     if (syncNodig && navigator.onLine) { clearTimeout(syncTimer); syncTimer = setTimeout(syncTelling, herkansMs); }
   }
   return gelukt;
@@ -454,11 +468,15 @@ function mergeRondje(remote) {
   rondje = { route, actief, historie, archiefWacht: Array.from(awMap.values()), locUitz, gebieden, uitloop };
 }
 
-async function syncRondje() {
+// opties.stil (achtergrondcontrole): het scherm alleen bijwerken als er iets veranderd is
+async function syncRondje(opties) {
+  const stil = !!(opties && opties.stil);
   if (!getToken() || !navigator.onLine) return;
   if (rondjeSyncBezig) { planRondjeSync(); return; }
   rondjeSyncBezig = true;
   rondjeSyncNodig = false;
+  laatsteRondjeSync = Date.now();
+  const voor = JSON.stringify(rondje);
   let herkansMs = SYNC_HERKANS_MS;
   try {
     const { tekst: raw, sha } = await ghGetMetSha('rondje.json');
@@ -492,7 +510,10 @@ async function syncRondje() {
     rondjeSyncNodig = true;
   } finally {
     rondjeSyncBezig = false;
-    updateRondjeUI();
+    const veranderd = JSON.stringify(rondje) !== voor;
+    if (!stil || veranderd) updateRondjeUI();
+    // uitlooplijst en uitzonderingen staan ook in Gescand en het Overzicht
+    if (veranderd) renderAlles();
     if (rondjeSyncNodig && navigator.onLine) {
       clearTimeout(rondjeSyncTimer);
       rondjeSyncTimer = setTimeout(syncRondje, herkansMs);
@@ -2685,14 +2706,40 @@ function pasScanIndelingToe() {
 }
 
 // ---------- service worker & app-updates ----------
+// mag de pagina nu herladen? Niet midden in een open artikel, tijdens het scannen, met
+// een open sheet of terwijl er in een veld iets ingevuld staat (een leeg veld, zoals de
+// gefocuste zoekbalk van de handscanner, of een vinkje is geen bezwaar)
+function rustigVoorHerladen() {
+  if (!$('artPanel').hidden || camActief || document.querySelector('.overlay.open')) return false;
+  const a = document.activeElement;
+  if (a && a.matches && a.matches('input:not([type="checkbox"]), textarea, select') && a.value) return false;
+  return true;
+}
+
 function pasUpdateToe() {
-  // niet verversen midden in een open artikel of tijdens het scannen
-  if (!$('artPanel').hidden || camActief) {
+  if (!rustigVoorHerladen()) {
+    // de achtergrondcontrole (of het sluiten van het artikel) herlaadt zodra het kan
     updateWacht = true;
     toast('Nieuwe versie gedownload — wordt toegepast zodra je klaar bent');
     return;
   }
   location.reload();
+}
+
+// achtergrondcontrole, elke POLL_TICK_MS: wijzigingen van andere apparaten binnenhalen
+// (telling elke 20 s, rondje elke minuut) en af en toe naar een nieuwe app-versie zoeken.
+// Alleen als de app zichtbaar is en er internet en een token is; een sync die al loopt of
+// gepland staat gaat voor. Een sync die niets nieuws vindt, schrijft niets terug.
+function pollTick() {
+  if (document.visibilityState !== 'visible' || !navigator.onLine || !getToken()) return;
+  if (updateWacht && rustigVoorHerladen()) { location.reload(); return; }
+  const nu = Date.now();
+  if (!syncBezig && !syncNodig && nu - laatsteTellingSync >= POLL_TELLING_MS) syncTelling({ stil: true });
+  if (!rondjeSyncBezig && !rondjeSyncNodig && nu - laatsteRondjeSync >= POLL_RONDJE_MS) syncRondje({ stil: true });
+  if (swReg && nu - laatsteUpdateCheck >= UPDATE_CHECK_MS) {
+    laatsteUpdateCheck = nu;
+    swReg.update().catch(() => { /* offline; volgende keer opnieuw */ });
+  }
 }
 
 function registreerSw() {
@@ -2744,6 +2791,7 @@ function init() {
   }
 
   registreerSw();
+  setInterval(pollTick, POLL_TICK_MS);
 }
 
 init();
