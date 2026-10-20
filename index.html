@@ -38,6 +38,11 @@
         <input type="search" id="zoekInput" placeholder="Zoek op nummer / omschrijving…" autocomplete="off">
         <button id="btnZoek" aria-label="Zoeken">🔍</button>
       </div>
+      <!-- nieuw item zonder code (geen barcode of QR): komt in het Overzicht onder Nieuwe items -->
+      <div class="search-row nieuw-row">
+        <input type="text" id="nieuwInput" placeholder="Nieuw item, bijv. M10x50 voldraad" autocomplete="off" enterkeyhint="done">
+        <button id="btnNieuw" aria-label="Nieuw item toevoegen">＋</button>
+      </div>
 
       <div class="switch-row handscanner-row">
         <div>
@@ -190,10 +195,12 @@
           <li>Ga naar de webshop van de leverancier en log daar in.</li>
           <li>Plak het nummer uit de kolom <b>Hun nummer</b> in de webshop en bestel het artikel. Staat er iets bij <b>Aantal</b>, dan is dat het aantal dat in het magazijn is opgegeven.</li>
           <li>Besteld? Vink het vakje <b>Besteld</b> aan en vul in het veldje ernaast in hoeveel <b>verpakkingen</b> je hebt besteld. Een doos van 200 boutjes is 1.</li>
+          <li>Een <b>nieuw item</b> (blauwe balk) heeft geen code. Vul de <b>leverancier</b> in en klik op de suggestie: het item gaat dan naar die leverancier. Weet je het nummer, vul dan ook <b>Hun nummer</b> in.</li>
           <li>Per ongeluk of als test gescand? Met het <b>✕</b> vóór het artikelnummer haal je het artikel uit de lijst.</li>
         </ol>
       </div>
       <div id="ovBestellen"></div>
+      <datalist id="credLijst"></datalist>
     </div>
     <div class="card" id="kaartOpmerkingen">
       <h2>Opmerkingen</h2>

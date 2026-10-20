@@ -20,6 +20,13 @@ te annuleren: de registratie wordt een grafsteen en verdwijnt ook uit Gescand), 
 artikellijst en werkwijze.
 "Controle afronden" archiveert de controle in de cloud en maakt de lijst leeg, op alle apparaten.
 
+**Nieuwe items** (sinds v1.18.0, beide weergaven): iets zonder barcode of QR typ je op het scanscherm in
+de balk **Nieuw item** onder de zoekbalk; daarna opent het artikelscherm zoals na een scan. In de
+bestellijst staat zo'n item in een eigen blok **Nieuwe items** bovenaan (blauw). Op de pc vul je daar
+de leverancier in (suggesties uit de crediteuren van de artikellijst, een aangeklikte suggestie wordt
+meteen bewaard) en hun nummer; met een leverancier staat het item bovenaan in dat leveranciersblok,
+met een blauwe balk.
+
 **Simpele weergave** (sinds v1.16.0, per apparaat): een schuif in de header (alleen op de pc, vanaf
 900 px breed) en bovenaan Instellingen. Aan = alleen wat collega's nodig hebben. Op de scanner:
 Scannen, Gescand en Instellingen (alleen de schuif); een scan opent een kort artikelscherm met onder
@@ -81,7 +88,9 @@ Bestand heeft ook `bijgewerkt` (datum van de export). In het geheugen krijgt elk
 (zoekstring), die niet wordt opgeslagen.
 
 Registratie (`telling.json`, `items[sleutel]`): de artikelvelden plus `g` geteld, `best` bestellen,
-`opm` opmerking, `ts` tijdstempel (ms), `onb` onbekende code, `bsd` besteld-tijdstempel, `ink`
+`opm` opmerking, `ts` tijdstempel (ms), `onb` onbekende code, `nw` nieuw item zonder code (sleutel
+en `b` zijn dan `nieuw-…`, de omschrijving staat in `o`, leverancier in `c` en hun nummer in `h`, ingevuld
+op de pc), `bsd` besteld-tijdstempel, `ink`
 inkoopnummer, `kl` klaar-tijdstempel, `bl` "bijna leeg"-tijdstempel (een scan in de simpele weergave,
 zonder aantal), `vp` aantal bestelde verpakkingen (geheel getal, ingevuld in de simpele weergave op de
 pc), `del` grafsteen. Op de bestellijst staat alles met een bestelaantal óf `bl` (`opBestellijst`).

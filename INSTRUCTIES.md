@@ -64,6 +64,13 @@ Het token wordt alleen lokaal op het apparaat bewaard.
 ## Dagelijks gebruik
 
 - **Scannen** → barcode/QR richten → aantal geteld / bestellen / opmerking invullen → opslaan.
+- **Nieuw item** (balk onder de zoekbalk) → voor iets zonder barcode of QR. Typ wat het is
+  (bijv. *M10x50 voldraad*) en tik **＋** of Enter: het artikelscherm opent zoals na een scan, vul
+  eventueel een aantal in en sla op. Zonder aantal komt het er toch op. Op de pc staat het in de
+  bestellijst in het blauwe blok **Nieuwe items** bovenaan. Vul daar de **leverancier** in (klik
+  op de suggestie, bijv. de juiste naam van Fabory) en eventueel **Hun nummer**; het item staat dan
+  bovenaan bij die leverancier, met een blauwe balk. Leverancier leegmaken zet het terug bij Nieuwe
+  items. Werkt in de normale en de simpele weergave.
 - **Handscanner** (schuifje op het scanscherm) → voor een toestel met ingebouwde
   laserscanner. De camera-scanknop verdwijnt; scan een code en het artikel opent
   vanzelf, zonder dat het toetsenbord omhoog komt. Het schuifje blijft op dat

@@ -3,6 +3,48 @@
 Nieuwste sessie bovenaan. Oudere geschiedenis staat in git (`git log --oneline`) en in de vault
 (`NoteFlow\projecten\MagazijnScanner\Verleden.md`).
 
+## 2026-10-20 (vervolg) — v1.18.0: nieuwe items zonder code
+
+**Aanleiding.** Timo: items zonder QR-code of nummer moeten ook genoteerd en besteld kunnen worden.
+Op het scanscherm een extra invoerbalk "Nieuwe items" (simpel én normaal); in het overzicht een eigen
+kopje Nieuwe items; op de pc extra info toevoegen, zoals de leverancier met een aanklikbare suggestie
+(voorbeeld: Fabory); daarna staat het item bij die leverancier, helemaal bovenaan met een andere kleur
+balk.
+
+**Gedaan.**
+- `index.html`: tweede `.search-row` (`.nieuw-row`, `#nieuwInput`, `#btnNieuw`) onder de zoekbalk;
+  `<datalist id="credLijst">` in de kaart Bestellen; uitleg: stap over nieuwe items.
+- `app.js`: `NIEUW_PREFIX`/`NIEUW_GROEP`, `nieuwArtikel`, `naamVan`, `nrVan`, `nieuwItem` (balk →
+  artikelscherm zoals na een scan, sleutel `nieuw-<tijd><toeval>`), `nieuwItemVelden` (artikelscherm
+  simpel en normaal: leverancier, hun nummer, uitleg; geen Voorraad klopt en geen Uitloop),
+  `artikelVanRegistratie`/`sleutelVoor` kennen `nw`. Opslaan zonder aantal = `bl` (simpel én normaal).
+  Bestellijst: blok "Nieuwe items" (`NIEUW_GROEP`) altijd eerst, nieuwe items bovenaan in hun blok,
+  `nieuwItemCellen` (omschrijving kopieerbaar, veld leverancier met suggesties, veld hun nummer met
+  kopieerknop), `vulCredLijst` en `credNaam` (hoofdletterongevoelig naar de bekende naam), een
+  aangeklikte suggestie wordt meteen bewaard. Telverschillen slaan nieuwe items over; Gescand toont
+  "nieuw item · leverancier" en een blauwe badge; CSV-kolom "Nieuw item" (vóór Uitloop), barcode leeg;
+  rondje logt nieuwe items niet (geen locatie). Versie 1.18.0.
+- Fout uit v1.16.0 meegenomen: `bouwEntry` gooide `bl` en `vp` weg bij opnieuw opslaan op het normale
+  artikelscherm (een simpel gescand artikel verdween dan van de bestellijst). Nu bewaard; ook telt
+  `bl` als inhoud bij Opslaan.
+- `style.css`: `--blauw`/`--blauw-dim`, `.badge.blauw`, `.nieuw-row`, blok `.cred-blok.nieuw`,
+  `tr.rij-nieuw` (blauwe achtergrond en balk links), velden `.ov-cred`/`.ov-hun`; `.art-field.vol` nu
+  algemeen.
+- Test `t_nieuw_item` (23 checks); documentatie README, INSTRUCTIES.md, ASK-kennis.
+
+**Eigen keuzes.** Na de invoerbalk opent het artikelscherm (zoals na een scan), zodat je meteen een
+aantal kunt opgeven. Op de pc zijn leverancier en hun nummer in te vullen, de omschrijving niet (fout =
+✕ en opnieuw invoeren). Een getypte naam die (los van hoofdletters) gelijk is aan een bekende
+crediteur wordt die naam; een andere naam geeft een eigen blok. Kleur: zacht blauw.
+
+**Testresultaten.** `node --check app.js` OK; volledige reeks **232/232**; na een laatste
+CSS-correctie (leveranciersveld overal even breed) nog eens `t_nieuw`, `t_bestel` en `t_simpel`: alles
+groen. Schermafdrukken: scanscherm met de balk Nieuw item, artikelscherm van een nieuw item, blok
+Nieuwe items op de pc, item bij een leverancier met blauwe balk, simpele weergave; geen horizontale
+scrollbalk, geen JavaScript-fouten.
+
+**Status.** v1.18.0 in de werkmap, niet gecommit en niet gepusht (wacht op Timo).
+
 ## 2026-10-20 — v1.17.0: handscanner-schuifje, gelijke besteltabel, ✕ om een scan te annuleren
 
 **Aanleiding.** Timo: (1) "Ik wil wel dat schuifje voor Handscanner in simpele modus." Gebouwd als
@@ -36,7 +78,20 @@ tekstwijziging in de uitleg nog eens `t_laden`, `t_simpel` en `t_bestel`: alles 
 Schermafdruk van de besteltabel in beide weergaven: tabel gelijk, ✕ vóór het nummer, geen
 JavaScript-fouten.
 
-**Status.** v1.17.0 in de werkmap, niet gecommit en niet gepusht (wacht op Timo).
+**Uitrol.** Timo: "Ja, zet online". Gecommit als `9303f0b` en gepusht; Pages-run en live versie
+gecontroleerd (vault-log "v1.17.0 gepusht en live"). Deze regel zelf is nog niet gecommit.
+
+**Status.** v1.17.0 live en in git. Plan simpele weergave: GEBOUWD, nagekeken: nee (Fable kijkt
+v1.16.0 t/m v1.17.0 samen na).
+
+**Open punten.**
+- Nakijken door Fable; daarna het plan afsluiten in de vault.
+- Op de pc en de scanner nalopen: simpele weergave, aantal op de scanner, handscanner, ✕ in de
+  bestellijst.
+- Rondje-CSV toont 1970-01-01 in de kolom Besteld (vault-issue).
+- Idee: kaart Koppeling tonen in de simpele weergave zonder geldig token (vault-idee).
+- Nog open uit de vault: v1.14.0/v1.15.0 nalopen op de telefoon, vastgelopen Pages-run afbreken,
+  `git stash drop`.
 
 ## 2026-10-19 (avond, vervolg) — v1.16.1: aantal invullen op de scanner (simpele weergave)
 

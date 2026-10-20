@@ -14,6 +14,8 @@
   --yellow-dim: rgba(232, 212, 139, 0.14);
   --red: #e09a9a;
   --red-dim: rgba(224, 154, 154, 0.14);
+  --blauw: #8fb8e8;                        /* nieuwe items (zonder code) */
+  --blauw-dim: rgba(143, 184, 232, 0.13);
   --radius: 16px;
   --radius-s: 12px;
   --shadow: 0 4px 24px rgba(0, 0, 0, 0.35);
@@ -192,6 +194,9 @@ main {
   font-size: 1rem;
   cursor: pointer;
 }
+/* nieuw item zonder code: tweede balk direct onder de zoekbalk */
+.nieuw-row { margin-top: 8px; }
+.nieuw-row input:focus { border-color: var(--blauw); }
 /* resultaten direct boven de zoekbalk; bij veel resultaten intern scrollen */
 .search-results {
   flex: 0 1 auto;
@@ -374,6 +379,7 @@ main {
 .badge.groen { background: var(--green-dim); color: var(--green); }
 .badge.geel { background: var(--yellow-dim); color: var(--yellow); }
 .badge.rood { background: var(--red-dim); color: var(--red); }
+.badge.blauw { background: var(--blauw-dim); color: var(--blauw); }
 
 /* invoer */
 .input-row { margin-bottom: 12px; }
@@ -984,7 +990,39 @@ body.simpel #view-instellingen .card:not(#kaartSimpel) { display: none; }
 /* simpel artikelscherm: artikelcode groter, twee kolommen, crediteur over de volle breedte */
 .art-nr.groot { font-size: 1.35rem; font-weight: 700; margin-top: 4px; }
 .art-grid.simpel { grid-template-columns: 1fr 1fr; }
-.art-grid.simpel .art-field.vol { grid-column: 1 / -1; }
+.art-field.vol { grid-column: 1 / -1; }
+
+/* ---------- Nieuwe items (zonder code) in de bestellijst ---------- */
+/* blok "Nieuwe items" (nog geen leverancier) en elke regel van een nieuw item: blauwe balk */
+.cred-blok.nieuw { border-color: var(--blauw); }
+.cred-blok.nieuw > .cred-kop { background: var(--blauw-dim); }
+.cred-blok.nieuw .cred-kop .naam { color: var(--blauw); }
+.cred-kop .cred-uitleg { color: var(--muted); font-size: 0.78rem; }
+tr.rij-nieuw td { background: var(--blauw-dim); }
+tr.rij-nieuw td:first-child { box-shadow: inset 4px 0 0 var(--blauw); }
+.art-met-del > .nieuw-cel { flex: 1; }   /* leveranciersveld overal even breed */
+.nieuw-cel .badge { font-size: 0.7rem; padding: 1px 7px; vertical-align: 1px; }
+input.ov-cred, input.ov-hun {
+  font: inherit;
+  font-size: 0.9rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  padding: 4px 8px;
+  vertical-align: middle;
+}
+input.ov-cred { display: block; margin-top: 6px; width: 100%; max-width: 16rem; }
+input.ov-hun { width: calc(100% - 2.2rem); max-width: 12rem; }
+input.ov-cred:focus, input.ov-hun:focus { border-color: var(--blauw); outline: none; }
+button.ov-hun-kopie {
+  background: none;
+  border: none;
+  color: var(--muted);
+  font: inherit;
+  cursor: pointer;
+  padding: 0 2px;
+}
 
 @media (min-width: 900px) {
   .scan-btn { width: 140px; height: 140px; }

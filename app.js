@@ -5,13 +5,15 @@
 'use strict';
 
 // ---------- constanten ----------
-const VERSIE = '1.17.0';
+const VERSIE = '1.18.0';
 const DATA_REPO = 'VanSchieBV/magazijn-data';
 const API_BASE = 'https://api.github.com/repos/' + DATA_REPO + '/contents/';
 const SYNC_HERKANS_MS = 8000;                        // herkansing na een netwerk- of serverfout
 const SYNC_CONFLICT_MS = 1500;                       // herkansing na een conflict (ander apparaat schreef net)
 const GRAFSTEEN_BEWAAR_MS = 30 * 24 * 3600 * 1000;   // grafstenen 30 dagen bewaren
 const TRIGGER_VENSTER = 2500; // ms zoeken na een druk op de scanknop
+const NIEUW_PREFIX = 'nieuw-';                       // sleutel van een nieuw item (zonder code)
+const NIEUW_GROEP = '__nieuw__';                     // blok "Nieuwe items" (nog zonder leverancier)
 const fmtDatum = new Intl.DateTimeFormat('nl-NL', { weekday: 'short', day: 'numeric', month: 'short' });
 const fmtTijd = new Intl.DateTimeFormat('nl-NL', { hour: '2-digit', minute: '2-digit' });
 
@@ -21,7 +23,7 @@ let artikelen = [];            // [{b,a,o,c,f,h,l,v}] (+ _zoek, alleen in het ge
 let artMeta = { sha: null, bijgewerkt: '?' };   // sha en exportdatum van de geladen artikellijst
 let artIndex = new Map();      // barcode -> [artikel,...]
 let artNrIndex = new Map();    // artikelnummer (upper) -> artikel
-let telling = { items: {} };   // key -> {b,a,o,c,f,h,l,v,g,best,opm,ts,onb,bsd,ink,kl,bl,vp} of grafsteen {b,ts,del}
+let telling = { items: {} };   // key -> {b,a,o,c,f,h,l,v,g,best,opm,ts,onb,nw,bsd,ink,kl,bl,vp} of grafsteen {b,ts,del}
 let locFoutCache = { art: null, uitz: null, fout: [] };   // artikelen met afwijkende locatienotatie
 let uitzCache = { bron: null, set: new Set() };           // uitzonderingenlijst als Set (kleine letters)
 
@@ -876,10 +878,21 @@ function zoekEnOpen(code) {
 function onbekendArtikel(code) {
   return { b: code, a: '', o: 'Onbekende code', c: '', f: '', h: '', l: '', v: '', onb: true };
 }
+// nieuw item: iets zonder code (geen barcode of QR), met de hand toegevoegd op het
+// scanscherm. Sleutel én b zijn 'nieuw-…'; de omschrijving staat in o; leverancier (c)
+// en hun nummer (h) vul je later op de pc in het Overzicht in. Registratie: nw = 1
+function nieuwArtikel(b, o, c, h) {
+  return { b, a: '', o, c: c || '', f: '', h: h || '', l: '', v: '', nw: true };
+}
+// naam in meldingen: artikelnummer, anders de barcode; bij een nieuw item de omschrijving
+function naamVan(x) { return x.nw ? x.o : (x.a || x.b); }
+// nummer in lijsten en tabellen (een nieuw item heeft geen nummer)
+function nrVan(it) { return it.nw ? 'nieuw item' : (it.a || it.b); }
 // het artikel van een registratie of uitloopregel: het artikel met die barcode en
 // hetzelfde artikelnummer, anders het (eerste) artikel met die barcode; staat de
 // code (nog) niet in de artikellijst, dan een onbekend artikel
 function artikelVanRegistratie(it) {
+  if (it.nw) return nieuwArtikel(it.b, it.o, it.c, it.h);
   const lijst = artIndex.get(it.b) || [];
   if (!lijst.length) return onbekendArtikel(it.b);
   return lijst.find(a => it.a && a.a === it.a)
@@ -894,7 +907,7 @@ function artikelVanRegistratie(it) {
 // Bestaande sleutels blijven geldig: staat er al iets onder barcode|artikelnummer,
 // of onder de kale barcode van dít artikel (van vóór v1.14), dan wordt die gebruikt.
 function sleutelVoor(art, opslag) {
-  if (art.onb || !art.a) return art.b;
+  if (art.onb || art.nw || !art.a) return art.b;
   const apart = art.b + '|' + art.a;
   if (levend(opslag[apart])) return apart;
   const kaal = levend(opslag[art.b]);
@@ -936,9 +949,12 @@ function openPaneel(art, behoudBlader, key) {
     const lijstBadge = opLijst ? ' <span class="badge geel">🛒 staat al op de bestellijst</span>' : '';
     $('artKop').innerHTML = art.onb
       ? '<div class="art-title">Onbekende code</div><div class="art-nr groot">' + esc(art.b) + lijstBadge + '</div>'
-      : '<div class="art-title">' + esc(art.o) + '</div><div class="art-nr groot">' + esc(art.a) + lijstBadge + '</div>';
+      : art.nw
+        ? '<div class="art-title">' + esc(art.o) + '</div><div class="art-nr groot"><span class="badge blauw">nieuw item</span>' + lijstBadge + '</div>'
+        : '<div class="art-title">' + esc(art.o) + '</div><div class="art-nr groot">' + esc(art.a) + lijstBadge + '</div>';
     $('artGrid').innerHTML = art.onb
       ? veld('Gescand', esc(art.b), '', true)
+      : art.nw ? nieuwItemVelden(art)
       : veld('Crediteur', esc(art.c || '–'), '', true) +
         veld('Fabrikantnummer', art.f ? '<span class="kopieer-waarde" data-copy="' + esc(art.f) + '">' + esc(art.f) + '</span>' : '–') +
         veld('Hun nummer', art.h ? '<span class="kopieer-waarde" data-copy="' + esc(art.h) + '">' + esc(art.h) + '</span>' : '–') +
@@ -961,6 +977,12 @@ function openPaneel(art, behoudBlader, key) {
       '<div class="art-nr">' + esc(art.b) + besteldBadge + '</div>';
     $('artGrid').innerHTML = veld('Gescand', esc(art.b)) +
       veld('Tip', 'Zet in de opmerking om welk artikel/vak het gaat');
+  } else if (art.nw) {
+    $('artKop').innerHTML =
+      '<div class="art-title">' + esc(art.o) + '</div>' +
+      '<div class="art-nr"><span class="badge blauw">nieuw item</span>' + besteldBadge + '</div>';
+    $('artGrid').innerHTML = nieuwItemVelden(art);
+    bindKopieKnoppen($('artGrid'));
   } else {
     $('artKop').innerHTML =
       '<div class="art-title">' + esc(art.o) + '</div>' +
@@ -984,7 +1006,8 @@ function openPaneel(art, behoudBlader, key) {
   $('inpOpmerking').value = bestaand ? (bestaand.opm || '') : '';
   zetActiefVeld('inpBestellen');
   $('btnVerwijder').hidden = !bestaand;
-  $('btnKlopt').hidden = !!art.onb;
+  $('btnKlopt').hidden = !!(art.onb || art.nw);
+  $('btnUitloop').hidden = !!art.nw;   // een nieuw item kan niet op de uitlooplijst
   $('scanIdle').hidden = true;
   $('artPanel').hidden = false;
   updateUitloopUI();
@@ -993,6 +1016,25 @@ function openPaneel(art, behoudBlader, key) {
   updateBesteldKnop();
   toonView('scan');
   window.scrollTo(0, 0);
+}
+
+// velden op het artikelscherm voor een nieuw item: leverancier en hun nummer (als die
+// op de pc al zijn ingevuld) en waar je ze invult
+function nieuwItemVelden(art) {
+  return veld('Leverancier', esc(art.c || 'nog niet bekend'), '', true) +
+    veld('Hun nummer', art.h ? '<span class="kopieer-waarde" data-copy="' + esc(art.h) + '">' + esc(art.h) + '</span>' : '–') +
+    veld('Zonder code', 'Leverancier en hun nummer vul je op de pc in het Overzicht in', '', true);
+}
+
+// nieuw item (zonder code) vanaf het scanscherm: het artikelscherm opent zoals na een scan
+function nieuwItem() {
+  const inp = $('nieuwInput');
+  const naam = inp.value.trim();
+  if (!naam) { toast('Typ eerst wat het is, bijv. M10x50 voldraad', true); return; }
+  inp.value = '';
+  inp.blur();
+  const key = NIEUW_PREFIX + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  openPaneel(nieuwArtikel(key, naam), false, key);
 }
 
 function bindKopieKnoppen(container) {
@@ -1101,7 +1143,7 @@ function wisselBesteld() {
   planSync();
   renderAlles();
   const rondjeNieuw = rondjeRegistreerScan(huidigeKey, entry);
-  toast('🛒 ' + (huidigArt.a || huidigArt.b) + ' besteld' +
+  toast('🛒 ' + naamVan(huidigArt) + ' besteld' +
     (rondjeNieuw.length ? ' · 📍 ' + rondjeNieuw.join(', ') + ' ✓' : ''));
   if (bladerIdx >= 0 && bladerIdx < bladerKeys.length - 1) blader(1);
   else { updateBladerUI(); updateBesteldKnop(); }
@@ -1174,11 +1216,12 @@ function simpelOpslaan() {
   if (aantal != null) entry.best = aantal;
   else entry.bl = nu;
   if (art.onb) entry.onb = true;
+  if (art.nw) entry.nw = 1;
   telling.items[huidigeKey] = entry;
   bewaarTelling();
   planSync();
   const rondjeNieuw = rondjeRegistreerScan(huidigeKey, entry);
-  toast('🛒 ' + (art.a || art.b) + (aantal != null ? ' · ' + aantal : '') + ' op de bestellijst' +
+  toast('🛒 ' + naamVan(art) + (aantal != null ? ' · ' + aantal : '') + ' op de bestellijst' +
     (rondjeNieuw.length ? ' · 📍 ' + rondjeNieuw.join(', ') + ' ✓' : ''));
   sluitPaneel();
   renderAlles();
@@ -1226,7 +1269,7 @@ function zetActiefVeld(id) {
 function verwijderRegistratie() {
   const bestaand = levend(telling.items[huidigeKey]);
   if (!bestaand) return;
-  const naam = huidigArt ? (huidigArt.a || huidigArt.b) : huidigeKey;
+  const naam = huidigArt ? naamVan(huidigArt) : huidigeKey;
   if (!confirm(naam + ' uit de controle verwijderen?\n\nGeteld, bestellen en opmerking van dit artikel worden gewist (op alle apparaten).')) return;
   verwijderRegistraties([huidigeKey]);
   renderAlles();
@@ -1252,7 +1295,7 @@ function verwijderRegistraties(keys) {
 // systeemvoorraad als getal (de export levert hem als tekst)
 function systeemVoorraad(it) { return parseInt(it.v, 10) || 0; }
 // telverschil: geteld wijkt af van de systeemvoorraad (onbekende codes tellen niet mee)
-function heeftVerschil(it) { return !it.onb && it.g != null && Number(it.g) !== systeemVoorraad(it); }
+function heeftVerschil(it) { return !it.onb && !it.nw && it.g != null && Number(it.g) !== systeemVoorraad(it); }
 
 // vol = veld over de volle breedte van het raster (simpel artikelscherm)
 function veld(lbl, val, klasse, vol) {
@@ -1285,11 +1328,15 @@ function bouwEntry(kloptDirect) {
     ts: Date.now()
   };
   if (art.onb) entry.onb = true;
-  const oud = telling.items[huidigeKey];
-  // besteld-markering, besteld-aantal en klaar-vinkje behouden bij opnieuw opslaan
+  if (art.nw) entry.nw = 1;
+  const oud = levend(telling.items[huidigeKey]);
+  // besteld-markering, besteld-aantal, klaar-vinkje, "bijna leeg" en verpakkingen
+  // behouden bij opnieuw opslaan
   if (oud && oud.bsd) entry.bsd = oud.bsd;
   if (oud && oud.ink) entry.ink = oud.ink;
   if (oud && oud.kl) entry.kl = oud.kl;
+  if (oud && oud.bl) entry.bl = oud.bl;
+  if (oud && oud.vp) entry.vp = oud.vp;
   return entry;
 }
 
@@ -1297,7 +1344,9 @@ function slaOp(kloptDirect) {
   if (!huidigArt) return;
   const art = huidigArt;
   const entry = bouwEntry(kloptDirect);
-  if (entry.g == null && entry.best == null && !entry.opm) {
+  // nieuw item zonder aantal: toch op de bestellijst ("bijna leeg"), net als in de simpele weergave
+  if (art.nw && entry.g == null && entry.best == null && !entry.opm && !entry.bl) entry.bl = entry.ts;
+  if (entry.g == null && entry.best == null && !entry.opm && !entry.bl) {
     if (levend(telling.items[huidigeKey])) {
       toast('Alles leeg — gebruik 🗑 om de registratie te verwijderen', true);
     } else {
@@ -1308,7 +1357,7 @@ function slaOp(kloptDirect) {
   telling.items[huidigeKey] = entry;
   bewaarTelling();
   planSync();
-  const naam = art.a || art.b;
+  const naam = naamVan(art);
   const rondjeNieuw = rondjeRegistreerScan(huidigeKey, entry);
   const extra = rondjeNieuw.length ? ' · 📍 ' + rondjeNieuw.join(', ') + ' ✓' : '';
   toast(kloptDirect ? ('✓ ' + naam + ' klopt (' + entry.g + ')' + extra) : ('✓ ' + naam + ' opgeslagen' + extra));
@@ -1325,6 +1374,7 @@ function maakLijstItem(it) {
   let badgeHtml = '';
   if (simpel) { /* geen geteld-, verschil- of uitloopbadge */ }
   else if (it.onb) badgeHtml = '<span class="badge rood">onbekend</span>';
+  else if (it.nw) badgeHtml = '<span class="badge blauw">nieuw</span>';
   else if (heeftVerschil(it)) badgeHtml = '<span class="badge rood">' + esc(it.g) + ' i.p.v. ' + systeemVoorraad(it) + '</span>';
   else if (it.g != null) badgeHtml = '<span class="badge groen">✓ ' + esc(it.g) + '</span>';
   if (simpel && it.bsd) badgeHtml = '<span class="badge groen">🛒 besteld · ' + esc(fmtDatum.format(it.bsd)) + '</span>';
@@ -1335,7 +1385,7 @@ function maakLijstItem(it) {
   el.className = 'item' + (it.kl && !simpel ? ' klaar' : '');
   el.innerHTML = (simpel ? '' : '<input type="checkbox" class="lijst-klaar" aria-label="Klaar"' + (it.kl ? ' checked' : '') + '>') +
     '<div class="mid"><div class="t1">' + esc(it.o) + '</div>' +
-    '<div class="t2">' + esc(it.a || it.b) + ' · ' + locHtml(it.l) +
+    '<div class="t2">' + (it.nw ? 'nieuw item' + (it.c ? ' · ' + esc(it.c) : '') : esc(it.a || it.b) + ' · ' + locHtml(it.l)) +
     (it.opm ? ' · 💬 ' + esc(it.opm) : '') + '</div></div>' +
     '<div class="right">' + badgeHtml + '</div>' +
     (it.kl && !simpel ? '<button class="lijst-del" aria-label="Verwijderen">✕</button>' : '');
@@ -1358,7 +1408,7 @@ function maakLijstItem(it) {
     e.stopPropagation();
     verwijderRegistraties([it.key]);
     renderAlles();
-    toast('🗑 ' + (it.a || it.b) + ' uit de controle verwijderd');
+    toast('🗑 ' + naamVan(it) + ' uit de controle verwijderd');
   };
   return el;
 }
@@ -1463,6 +1513,41 @@ function koppelOverzichtRijen(container) {
 
 // artikelcel in de overzichtstabellen: nummer vet met de omschrijving eronder;
 // kopieerbaar = tik op het nummer kopieert het (besteltabel)
+// cellen Artikel, Hun nummer en Locatie van een nieuw item (zonder code) in de
+// besteltabel: ✕, de omschrijving (kopieerbaar) en de velden leverancier en hun nummer
+function nieuwItemCellen(it) {
+  const k = esc(it.key);
+  return '<td><div class="art-met-del"><button type="button" class="ov-del" data-key="' + k +
+    '" aria-label="Uit het overzicht verwijderen" title="Uit het overzicht verwijderen">✕</button><div class="nieuw-cel">' +
+    '<b class="art-kopie" data-kopieer="' + esc(it.o) + '">' + esc(it.o) + '</b> <span class="badge blauw">nieuw</span>' +
+    '<input type="text" class="ov-cred" data-key="' + k + '" list="credLijst" placeholder="Leverancier…" autocomplete="off" value="' + esc(it.c || '') + '">' +
+    '</div></div></td>' +
+    '<td><input type="text" class="ov-hun" data-key="' + k + '" placeholder="Hun nummer" autocomplete="off" value="' + esc(it.h || '') + '">' +
+    (it.h ? ' <button type="button" class="ov-hun-kopie" data-kopieer="' + esc(it.h) + '" title="Kopieer hun nummer">⧉</button>' : '') + '</td>' +
+    '<td>–</td>';
+}
+
+// suggesties voor de leverancier van een nieuw item: alle crediteuren uit de artikellijst
+// plus leveranciers die al bij een nieuw item zijn ingevuld (alleen opnieuw opbouwen als er
+// iets veranderd is, anders springt een open suggestielijst weg)
+let credLijstHtml = '';
+function vulCredLijst() {
+  const namen = new Set();
+  for (const a of artikelen) if (a.c) namen.add(a.c);
+  for (const it of Object.values(telling.items)) if (!it.del && it.nw && it.c) namen.add(it.c);
+  const html = Array.from(namen).sort((x, y) => x.localeCompare(y, 'nl'))
+    .map(n => '<option value="' + esc(n) + '">').join('');
+  if (html !== credLijstHtml) { $('credLijst').innerHTML = html; credLijstHtml = html; }
+}
+// getypte leverancier: komt hij (los van hoofdletters) overeen met een bekende naam, dan
+// die naam, zodat het item in hetzelfde blok komt; anders de tekst zoals getypt
+function credNaam(v) {
+  const t = String(v || '').trim();
+  const l = t.toLowerCase();
+  const o = Array.from($('credLijst').options).find(x => x.value.toLowerCase() === l);
+  return o ? o.value : t;
+}
+
 // delKey = sleutel van de registratie: dan staat er een ✕ vóór het nummer (besteltabel)
 function artikelCel(nr, oms, kopieerbaar, delKey) {
   const inhoud = '<b' + (kopieerbaar ? ' class="art-kopie" data-kopieer="' + esc(nr) + '"' : '') + '>' + esc(nr) +
@@ -1508,8 +1593,8 @@ function renderOverzicht() {
   } else {
     let h = '<table><tr><th>Artikel</th><th>Locatie</th><th class="num">Systeem</th><th class="num">Geteld</th></tr>';
     for (const it of geteld.sort((a, b) => vergelijkLoc(a.l, b.l))) {
-      h += '<tr data-key="' + esc(it.key) + '">' + artikelCel(it.a || it.b, it.o) +
-        '<td>' + locHtml(it.l) + '</td><td class="num">' + (it.onb ? '–' : systeemVoorraad(it)) + '</td>' +
+      h += '<tr data-key="' + esc(it.key) + '">' + artikelCel(nrVan(it), it.o) +
+        '<td>' + locHtml(it.l) + '</td><td class="num">' + (it.onb || it.nw ? '–' : systeemVoorraad(it)) + '</td>' +
         '<td class="num ' + (heeftVerschil(it) ? 'afwijkend' : 'klopt') + '">' + esc(it.g) + '</td></tr>';
     }
     $('ovGeteld').innerHTML = h + '</table>';
@@ -1524,7 +1609,7 @@ function renderOverzicht() {
     for (const it of verschillen.sort((a, b) => vergelijkLoc(a.l, b.l))) {
       const sys = systeemVoorraad(it);
       const d = Number(it.g) - sys;
-      h += '<tr data-key="' + esc(it.key) + '">' + artikelCel(it.a || it.b, it.o) +
+      h += '<tr data-key="' + esc(it.key) + '">' + artikelCel(nrVan(it), it.o) +
         '<td>' + locHtml(it.l) + '</td><td class="num">' + sys + '</td><td class="num">' + esc(it.g) + '</td>' +
         '<td class="num afwijkend">' + (d > 0 ? '+' : '') + d + '</td></tr>';
     }
@@ -1538,22 +1623,29 @@ function renderOverzicht() {
   } else {
     const groepen = {};
     for (const it of bestellen) {
-      const c = credVan(it) || 'Onbekende crediteur';
+      // nieuw item zonder leverancier: eigen blok "Nieuwe items" (bovenaan)
+      const c = it.nw && !it.c ? NIEUW_GROEP : (credVan(it) || 'Onbekende crediteur');
       (groepen[c] = groepen[c] || []).push(it);
     }
+    const namen = Object.keys(groepen).filter(c => c !== NIEUW_GROEP).sort();
+    if (groepen[NIEUW_GROEP]) namen.unshift(NIEUW_GROEP);
+    if (bestellen.some(it => it.nw)) vulCredLijst();
     const besteld = bestellen.filter(it => it.bsd);
     // bovenaan: alle bestelde regels in één keer opschonen (alleen als er iets besteld is)
     let h = besteld.length
       ? '<div class="opschoon-rij"><button type="button" class="btn stil klein" id="btnSchoonBesteld">🧹 Bestelde regels opschonen · ' + besteld.length + '</button></div>'
       : '';
-    for (const cred of Object.keys(groepen).sort()) {
-      const regels = groepen[cred];
+    for (const cred of namen) {
+      // nieuwe items bovenaan in hun blok (stabiele sortering: verder de gewone volgorde)
+      const regels = groepen[cred].sort((x, y) => (y.nw ? 1 : 0) - (x.nw ? 1 : 0));
       const nogTeDoen = regels.filter(it => !it.bsd);
       const gedaan = regels.length - nogTeDoen.length;
       const dicht = ovDicht.has(cred);
-      h += '<div class="cred-blok"><div class="cred-kop" data-cred="' + esc(cred) + '">' +
+      const nieuwBlok = cred === NIEUW_GROEP;
+      h += '<div class="cred-blok' + (nieuwBlok ? ' nieuw' : '') + '"><div class="cred-kop" data-cred="' + esc(cred) + '">' +
         '<span class="klap">' + (dicht ? '▸' : '▾') + '</span>' +
-        '<span class="naam">' + esc(cred) + '</span>' +
+        '<span class="naam">' + esc(nieuwBlok ? 'Nieuwe items' : cred) + '</span>' +
+        (nieuwBlok ? '<span class="cred-uitleg">zonder code: vul de leverancier in</span>' : '') +
         (nogTeDoen.length ? '' : '<span class="badge groen">✓ Alles besteld</span>') +
         '<span class="cred-sub">' + regels.length + ' artikel' + (regels.length > 1 ? 'en' : '') + '</span>' +
         (gedaan ? '<button type="button" class="cred-schoon" data-cred="' + esc(cred) + '" title="Bestelde regels van deze leverancier opschonen">🧹 ' + gedaan + '</button>' : '') +
@@ -1563,8 +1655,11 @@ function renderOverzicht() {
         h += '<div class="tabel-wrap"><table class="bestel-tabel"><tr><th>Artikel</th><th>Hun nummer</th><th>Locatie</th><th class="num">Aantal</th><th>Besteld</th></tr>';
         for (const it of regels) {
           const hun = it.h || it.f || '';
-          h += '<tr data-key="' + esc(it.key) + '"' + (it.bsd ? ' class="rij-besteld"' : '') + '>' + artikelCel(it.a || it.b, it.o, true, it.key) +
-            (hun ? '<td class="hun-kopie" data-kopieer="' + esc(hun) + '">' + esc(hun) + '</td>' : '<td>–</td>') + '<td>' + locHtml(it.l) + '</td>' +
+          const rijKlas = [it.nw ? 'rij-nieuw' : '', it.bsd ? 'rij-besteld' : ''].filter(Boolean).join(' ');
+          h += '<tr data-key="' + esc(it.key) + '"' + (rijKlas ? ' class="' + rijKlas + '"' : '') + '>' +
+            (it.nw ? nieuwItemCellen(it)
+              : artikelCel(it.a || it.b, it.o, true, it.key) +
+                (hun ? '<td class="hun-kopie" data-kopieer="' + esc(hun) + '">' + esc(hun) + '</td>' : '<td>–</td>') + '<td>' + locHtml(it.l) + '</td>') +
             '<td class="num"><input type="text" class="ov-aantal" data-key="' + esc(it.key) + '" inputmode="numeric" maxlength="4" placeholder="–" value="' + esc(it.best) + '"></td>' +
             '<td class="besteld-cel"><input type="checkbox" class="ov-besteld" data-key="' + esc(it.key) + '"' + (it.bsd ? ' checked' : '') + '>' +
             (simpel
@@ -1601,7 +1696,7 @@ function renderOverzicht() {
       btn.onclick = (e) => {
         e.stopPropagation();
         const cred = btn.getAttribute('data-cred');
-        schoonMetVraag(groepen[cred].filter(it => it.bsd).map(it => it.key), cred);
+        schoonMetVraag(groepen[cred].filter(it => it.bsd).map(it => it.key), cred === NIEUW_GROEP ? 'Nieuwe items' : cred);
       };
     });
     // ✕ vóór het artikelnummer: de scan annuleren. De registratie verdwijnt (grafsteen) uit
@@ -1612,13 +1707,41 @@ function renderOverzicht() {
         const key = btn.getAttribute('data-key');
         const it = levend(telling.items[key]);
         if (!it) return;
-        const naam = it.a || it.b;
-        if (!confirm(naam + (it.o ? ' (' + it.o + ')' : '') + ' uit het overzicht verwijderen?\n\n' +
+        const naam = naamVan(it);
+        if (!confirm(naam + (it.o && !it.nw ? ' (' + it.o + ')' : '') + ' uit het overzicht verwijderen?\n\n' +
           'De scan wordt geannuleerd: het artikel verdwijnt uit de bestellijst en uit Gescand, op alle apparaten. ' +
           'Een telling of opmerking van dit artikel gaat ook weg.')) return;
         verwijderRegistraties([key]);
         renderAlles();
         toast('🗑 ' + naam + ' uit het overzicht verwijderd');
+      };
+    });
+    // nieuw item: leverancier (met suggesties uit de artikellijst) en hun nummer invullen.
+    // Een aangeklikte suggestie wordt meteen bewaard; het item schuift dan naar die leverancier
+    const bewaarNieuwVeld = (inp) => {
+      const key = inp.getAttribute('data-key');
+      const it = levend(telling.items[key]);
+      if (!it) return;
+      const veldNaam = inp.classList.contains('ov-cred') ? 'c' : 'h';
+      const v = veldNaam === 'c' ? credNaam(inp.value) : inp.value.trim();
+      if ((it[veldNaam] || '') === v) return;
+      zetItem(key, x => { if (v) x[veldNaam] = v; else delete x[veldNaam]; });
+      if (veldNaam === 'c') toast(v ? '📦 ' + it.o + ' staat nu bij ' + v : '📦 ' + it.o + ' staat weer bij Nieuwe items');
+    };
+    $('ovBestellen').querySelectorAll('.ov-cred, .ov-hun').forEach(inp => {
+      inp.onclick = (e) => e.stopPropagation();
+      inp.onkeydown = (e) => { if (e.key === 'Enter') inp.blur(); };
+      inp.onblur = () => { if (renderUitgesteld) renderAlles(); };
+      inp.onchange = () => bewaarNieuwVeld(inp);
+    });
+    $('ovBestellen').querySelectorAll('.ov-cred').forEach(inp => {
+      inp.oninput = (e) => {
+        // een keuze uit de suggestielijst komt binnen als één invoer van de hele naam
+        const gekozen = !(e instanceof InputEvent) || e.inputType === 'insertReplacementText';
+        if (gekozen && Array.from($('credLijst').options).some(o => o.value === inp.value)) {
+          bewaarNieuwVeld(inp);
+          inp.blur();
+        }
       };
     });
     // tik op artikelnummer of Hun nummer kopieert die waarde, zonder de rij te openen
@@ -1703,7 +1826,7 @@ function renderOverzicht() {
   } else {
     let h = '<table><tr><th>Artikel</th><th>Locatie</th><th>Opmerking</th></tr>';
     for (const it of opmerkingen) {
-      h += '<tr data-key="' + esc(it.key) + '">' + artikelCel(it.a || it.b, it.o) +
+      h += '<tr data-key="' + esc(it.key) + '">' + artikelCel(nrVan(it), it.o) +
         '<td>' + locHtml(it.l) + '</td><td>' + esc(it.opm) + '</td></tr>';
     }
     $('ovOpmerkingen').innerHTML = h + '</table>';
@@ -1738,14 +1861,14 @@ function renderOverzicht() {
 function downloadScanlijst() {
   const items = registraties().sort((a, b) => vergelijkLoc(a.l, b.l));
   if (!items.length) { toast('Nog niets geteld', true); return; }
-  const kol = ['Barcode','Artikelnummer','Korte omschrijving','Fabrikantcode','Hun nummer','Locatie','Locatienotatie','Tech. Voorraad','Geteld','Crediteur','Bestellen','Besteld','Inkoopnummer','Bijna leeg','Verpakkingen','Uitloop','Opmerking'];
+  const kol = ['Barcode','Artikelnummer','Korte omschrijving','Fabrikantcode','Hun nummer','Locatie','Locatienotatie','Tech. Voorraad','Geteld','Crediteur','Bestellen','Besteld','Inkoopnummer','Bijna leeg','Verpakkingen','Nieuw item','Uitloop','Opmerking'];
   const regels = [kol.join(';')];
   for (const it of items) {
-    regels.push(csvRegel([it.b, it.a, it.o, it.f, it.h, it.l,
+    regels.push(csvRegel([it.nw ? '' : it.b, it.a, it.o, it.f, it.h, it.l,
       it.l && !locNotatieOk(it.l) ? 'afwijkend' : '', it.v,
       it.g != null ? it.g : '', credVan(it), it.best != null ? it.best : '',
       it.bsd ? datumIso(it.bsd) : '', it.ink || '', it.bl ? datumIso(it.bl) : '', it.vp || '',
-      uitloopVanArtikel(artikelVanRegistratie(it)) ? 'ja' : '', it.opm]));
+      it.nw ? 'ja' : '', uitloopVanArtikel(artikelVanRegistratie(it)) ? 'ja' : '', it.opm]));
   }
   downloadCsv('Scanlijst ' + new Date().toISOString().slice(0, 10) + '.csv', regels);
 }
@@ -1823,7 +1946,7 @@ function rondjeDue() {
 // geeft de namen van nieuw afgevinkte locaties terug (voor in de toast).
 function rondjeRegistreerScan(key, entry) {
   const act = rondje.actief;
-  if (!act) return [];
+  if (!act || entry.nw) return [];   // een nieuw item (zonder code) hoort niet bij een locatie
   act.scans[key] = {
     ts: entry.ts, b: entry.b, a: entry.a || '', o: entry.o || '', l: entry.l || '',
     g: entry.g != null ? entry.g : null, best: entry.best != null ? entry.best : null,
@@ -2312,7 +2435,7 @@ function toonView(naam) {
 // andere zodra ze geopend worden. De teller in de navigatie loopt altijd mee.
 function renderAlles() {
   const a = document.activeElement;
-  if (a && a.matches && a.matches('.ov-aantal, .ov-ink, .ov-vp')) { renderUitgesteld = true; return; }
+  if (a && a.matches && a.matches('.ov-aantal, .ov-ink, .ov-vp, .ov-cred, .ov-hun')) { renderUitgesteld = true; return; }
   renderUitgesteld = false;
   updateNavBadge();
   if ($('view-lijst').classList.contains('active')) renderLijst();
@@ -2358,6 +2481,9 @@ function bindEvents() {
   $('btnKiesSluit').addEventListener('click', () => sluitSheet('kiesOverlay'));
 
   $('btnZoek').addEventListener('click', handmatigZoeken);
+  // nieuw item zonder code: typen en op ＋ (of Enter)
+  $('btnNieuw').addEventListener('click', nieuwItem);
+  $('nieuwInput').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); nieuwItem(); } });
   $('zoekInput').addEventListener('keydown', e => {
     if (e.key !== 'Enter') return;
     // handscanner-stand: Enter (van de scanner) = direct openen

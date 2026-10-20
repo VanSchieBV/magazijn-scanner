@@ -35,7 +35,7 @@ PATCH_CSV = "window.__csv = []; downloadCsv = (naam, regels) => window.__csv.pus
 def t_laden(b):
     tel, = vers(b, 412); tel.start()
     check('laden: geen JS-fouten', tel.fouten() == [], tel.fouten())
-    check('laden: versie 1.17.0 in Instellingen', '1.17.0' in tel.ev("$('versieInfo').textContent"))
+    check('laden: versie 1.18.0 in Instellingen', '1.18.0' in tel.ev("$('versieInfo').textContent"))
     check('D7: ZXing niet geladen bij de start', tel.ev("typeof ZXing") == 'undefined')
     check('D2: status groen na start', tel.ev("$('statusDot').className") == 'status-dot ok', tel.ev("$('statusTxt').textContent"))
     pc = b.apparaat(1280); pc.start()
@@ -396,6 +396,62 @@ def t_bestel_opschonen(b):
     check('opschonen: gesynct naar de cloud', rem['222'].get('del') is True and 'bsd' not in rem['111'] and rem['111']['g'] == 7, rem)
     check('geen JS-fouten', pc.fouten() == [], pc.fouten())
 
+def t_nieuw_item(b):
+    tel, pc = vers(b, 412, 1280); tel.start(extra={'mgz_simpel': '1'}); pc.start()
+    reg(pc, '222', bestel=4)
+    check('nieuw: balk onder de zoekbalk op het scanscherm', tel.ev("$('nieuwInput').offsetParent !== null") and tel.ev("!!($('zoekInput').compareDocumentPosition($('nieuwInput')) & 4)"))
+    tel.ev("window.__toasts = []; $('btnNieuw').click()")
+    check('nieuw: leeg = melding, geen artikelscherm', tel.ev("$('artPanel').hidden") is True and any('Typ eerst' in t for t in tel.ev("window.__toasts")))
+    tel.ev("$('nieuwInput').value = 'M10x50 voldraad'; $('nieuwInput').dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', bubbles: true}))")
+    kop = tel.ev("$('artKop').textContent")
+    check('nieuw: Enter opent het artikelscherm met de omschrijving', tel.ev("$('artPanel').hidden") is False and 'M10x50 voldraad' in kop and 'nieuw item' in kop and tel.ev("$('nieuwInput').value") == '', kop)
+    tel.ev("$('inpSimpelBestellen').value = '5'; $('btnSimpelOpslaan').click()")
+    k, v = json.loads(tel.ev("JSON.stringify(Object.entries(telling.items).find(([k, v]) => v.nw))"))
+    check('nieuw: registratie met eigen sleutel, omschrijving en aantal', k.startswith('nieuw-') and v['o'] == 'M10x50 voldraad' and v['best'] == 5 and v['nw'] == 1, [k, v])
+    tel.ev("toonView('lijst')")
+    lijst = tel.ev("$('lijstItems').textContent")
+    check('nieuw: in Gescand met de omschrijving, zonder interne sleutel', 'M10x50 voldraad' in lijst and 'nieuw-' not in lijst, lijst)
+    tel.ev("await syncTellingDirect()"); pc.ev("await syncTellingDirect(); toonView('overzicht')")
+    rij = f"$('ovBestellen').querySelector('tr[data-key=\"{k}\"]')"
+    check('nieuw: pc toont het blok Nieuwe items bovenaan', pc.ev("$('ovBestellen').querySelector('.cred-blok').classList.contains('nieuw')") and pc.ev("$('ovBestellen').querySelector('.cred-blok .naam').textContent") == 'Nieuwe items')
+    check('nieuw: regel met blauwe balk en velden leverancier en hun nummer', pc.ev(rij + ".classList.contains('rij-nieuw')") and pc.ev("!!" + rij + ".querySelector('.ov-cred')") and pc.ev("!!" + rij + ".querySelector('.ov-hun')") and pc.ev("!!" + rij + ".querySelector('.ov-del')"))
+    check('nieuw: niet bij de telverschillen', 'M10x50' not in pc.ev("$('ovVerschillen').textContent"))
+    opties = pc.ev("Array.from($('credLijst').options).map(o => o.value)")
+    check('nieuw: leveranciers als suggestie uit de artikellijst', opties == ['Leverancier A', 'Leverancier B', 'Leverancier C'], opties)
+    pc.ev(rij + ".querySelector('.ov-hun').value = 'FAB-123'; " + rij + ".querySelector('.ov-hun').dispatchEvent(new Event('change'))")
+    check('nieuw: hun nummer invullen, met kopieerknop', pc.ev(f"telling.items['{k}'].h") == 'FAB-123' and pc.ev("!!" + rij + ".querySelector('.ov-hun-kopie')"))
+    pc.ev("const i = " + rij + ".querySelector('.ov-cred'); i.value = 'Leverancier A'; i.dispatchEvent(new Event('input'))")
+    check('nieuw: suggestie aanklikken zet de leverancier', pc.ev(f"telling.items['{k}'].c") == 'Leverancier A')
+    bovenaan = pc.ev("(() => { const blok = [...$('ovBestellen').querySelectorAll('.cred-blok')].find(x => x.querySelector('.naam').textContent === 'Leverancier A'); const r = blok.querySelectorAll('tr[data-key]'); return [r.length, r[0].classList.contains('rij-nieuw')]; })()")
+    check('nieuw: blok Nieuwe items weg, item bovenaan bij de leverancier', pc.ev("!$('ovBestellen').querySelector('.cred-blok.nieuw')") and bovenaan == [2, True], bovenaan)
+    pc.ev("const i = " + rij + ".querySelector('.ov-cred'); i.value = 'leverancier b'; i.dispatchEvent(new Event('change'))")
+    check('nieuw: getypte naam zonder hoofdletters wordt de bekende naam', pc.ev(f"telling.items['{k}'].c") == 'Leverancier B')
+    pc.ev("const i = " + rij + ".querySelector('.ov-cred'); i.value = 'Fabory'; i.dispatchEvent(new Event('change'))")
+    check('nieuw: onbekende leverancier krijgt een eigen blok', pc.ev(f"telling.items['{k}'].c") == 'Fabory' and 'Fabory' in pc.ev("[...$('ovBestellen').querySelectorAll('.cred-kop .naam')].map(x => x.textContent)"))
+    pc.ev("const i = " + rij + ".querySelector('.ov-cred'); i.value = ''; i.dispatchEvent(new Event('change'))")
+    check('nieuw: leverancier leegmaken = terug naar Nieuwe items', pc.ev(f"telling.items['{k}'].c == null") and pc.ev("!!$('ovBestellen').querySelector('.cred-blok.nieuw tr[data-key]')"))
+    pc.ev("await syncTellingDirect()")
+    rem = remote('telling.json')['items'][k]
+    check('nieuw: gesynct met hun nummer', rem.get('nw') == 1 and rem.get('h') == 'FAB-123' and rem.get('o') == 'M10x50 voldraad', rem)
+    pc.ev("toonView('scan'); $('nieuwInput').value = 'Kabel 2,5 mm'; $('btnNieuw').click()")
+    check('nieuw (normaal): artikelscherm zonder Voorraad klopt en Uitloop', pc.ev("$('artNormaal').hidden") is False and pc.ev("$('btnKlopt').hidden") is True and pc.ev("$('btnUitloop').hidden") is True and 'Kabel 2,5 mm' in pc.ev("$('artKop').textContent"))
+    pc.ev("slaOp(false)")
+    k2, v2 = json.loads(pc.ev("JSON.stringify(Object.entries(telling.items).find(([k, v]) => v.nw && v.o === 'Kabel 2,5 mm'))"))
+    check('nieuw (normaal): opslaan zonder aantal = toch op de bestellijst', isinstance(v2.get('bl'), int) and v2.get('best') is None and pc.ev("$('artPanel').hidden") is True, v2)
+    pc.ev("zoekEnOpen('222')")
+    check('gewoon artikel: Voorraad klopt en Uitloop weer zichtbaar', pc.ev("$('btnKlopt').hidden") is False and pc.ev("$('btnUitloop').hidden") is False)
+    pc.ev("sluitPaneel(); " + PATCH_CSV + " downloadScanlijst()")
+    csv = pc.ev("window.__csv[0].regels")
+    rm = next(r for r in csv[1:] if 'M10x50 voldraad' in r).split(';')
+    check('nieuw: CSV met kolom Nieuw item, zonder interne sleutel', csv[0].split(';')[15] == 'Nieuw item' and rm[0] == '' and rm[15] == 'ja' and rm[4] == 'FAB-123', [csv[0], rm])
+    pc.ev("toonView('overzicht'); " + rij + ".querySelector('.ov-del').click()")
+    check('nieuw: ✕ haalt het nieuwe item weg', pc.ev(f"telling.items['{k}'].del") is True)
+    # opnieuw opslaan op het normale artikelscherm houdt "bijna leeg" en verpakkingen (fout uit v1.16.0)
+    pc.ev("zetSimpel(true); zoekEnOpen('111'); $('btnSimpelOpslaan').click(); telling.items['111'].vp = 2; zetSimpel(false)")
+    pc.ev("zoekEnOpen('111'); $('inpGeteld').value = '9'; slaOp(false)")
+    check('opnieuw opslaan houdt bijna leeg en verpakkingen', pc.ev("!!telling.items['111'].bl && telling.items['111'].vp === 2 && telling.items['111'].g === 9"))
+    check('nieuw: geen JS-fouten', tel.fouten() == [] and pc.fouten() == [], [tel.fouten(), pc.fouten()])
+
 MAAT_RIJ = """(() => {
   const r = $('ovBestellen').querySelector('tr[data-key="222"]'), x0 = r.getBoundingClientRect().left;
   const veld = r.querySelector('.ov-ink, .ov-vp'), rect = el => el.getBoundingClientRect();
@@ -624,7 +680,7 @@ def t_a8_d6(b):
     check('D6: volle cache geeft een duidelijke melding', ok is True and any('te groot voor de cache' in t for t in tel.ev('window.__toasts')), tel.ev('window.__toasts'))
     check('D6: artikellijst werkt dan wel', tel.ev("artikelen.length") == 6 and tel.ev("statusPerTaak.art.soort") == 'ok')
 
-TESTS = [t_laden, t_a1, t_a2, t_a2_review, t_a3, t_a4, t_a8_d6, t_a5, t_a6, t_a7_c1, t_a9_d2, t_a10, t_a11_d4, t_a12, t_b2, t_c3_c5, t_d5, t_rondje, t_uitloop_bestel, t_bestel_opschonen, t_bestel_verwijderen, t_simpel_pc, t_simpel_telefoon, t_instellingen]
+TESTS = [t_laden, t_a1, t_a2, t_a2_review, t_a3, t_a4, t_a8_d6, t_a5, t_a6, t_a7_c1, t_a9_d2, t_a10, t_a11_d4, t_a12, t_b2, t_c3_c5, t_d5, t_rondje, t_uitloop_bestel, t_bestel_opschonen, t_bestel_verwijderen, t_nieuw_item, t_simpel_pc, t_simpel_telefoon, t_instellingen]
 
 if __name__ == '__main__':
     filt = sys.argv[1] if len(sys.argv) > 1 else ''
